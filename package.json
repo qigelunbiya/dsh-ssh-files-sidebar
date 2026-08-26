@@ -55,7 +55,7 @@
   },
   "dependencies": {
     "@linxin666/dsh-ssh": "0.1.16",
-    "dsh-rw": "0.4.1",
+    "dsh-rw": "https://github.com/MDR-EX1000/dsh-rw/releases/latest/download/dsh-rw.tgz",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
