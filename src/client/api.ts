@@ -23,11 +23,6 @@ export interface ExecResult {
   error?: string
 }
 
-export interface GitStatusSnapshot {
-  root: string
-  entries: Array<{ status: string; path: string }>
-}
-
 const BASE = '/api/dsh-ssh'
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -54,7 +49,7 @@ function query(params: Record<string, string>): string {
   return new URLSearchParams(params).toString()
 }
 
-/** POSIX-shell single-quote escaping for the short mutation commands below. */
+/** POSIX-shell single-quote escaping for the short remote commands below. */
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`
 }
@@ -143,39 +138,39 @@ export async function deleteRemotePath(alias: string, path: string, isDirectory:
 }
 
 /**
- * Resolve the nearest git worktree for a file/directory and return porcelain-v1
- * status entries. A non-git path resolves to null rather than surfacing an error.
+ * Return a human-readable archive member listing without downloading the
+ * archive into the browser. The command is selected from the filename and
+ * uses common server-side tools (tar/gzip/unzip/xz/7z/unrar).
  */
-export async function readGitStatus(alias: string, path: string, isDirectory: boolean): Promise<GitStatusSnapshot | null> {
-  const dir = isDirectory ? path : path.replace(/\/+[^/]+$/, '') || '/'
-  const command = [
-    `root=$(git -C ${shellQuote(dir)} rev-parse --show-toplevel 2>/dev/null) || exit 17`,
-    `printf '__DSH_GIT_ROOT__%s\\n' "$root"`,
-    `git -C "$root" status --porcelain=v1 --untracked-files=all`,
-  ].join('; ')
+export async function readArchiveListing(alias: string, path: string): Promise<string> {
+  const lower = path.toLowerCase()
+  const quoted = shellQuote(path)
+  let command: string
 
-  try {
-    const result = await execRemote(alias, command)
-    const lines = result.stdout.replace(/\r/g, '').split('\n')
-    const rootLine = lines.shift() ?? ''
-    if (!rootLine.startsWith('__DSH_GIT_ROOT__')) return null
-    const root = rootLine.slice('__DSH_GIT_ROOT__'.length).trim()
-    if (root === '') return null
-    const entries: GitStatusSnapshot['entries'] = []
-    for (const line of lines) {
-      if (line.length < 4) continue
-      const status = line.slice(0, 2)
-      let relative = line.slice(3)
-      const arrow = relative.lastIndexOf(' -> ')
-      if (arrow >= 0) relative = relative.slice(arrow + 4)
-      relative = relative.replace(/^"|"$/g, '')
-      const absolute = root === '/' ? `/${relative}` : `${root.replace(/\/$/, '')}/${relative}`
-      entries.push({ status, path: absolute })
-    }
-    return { root, entries }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    if (/exit code 17|not a git repository/i.test(message)) return null
-    throw error
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    command = `tar -tzf ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.tar.bz2') || lower.endsWith('.tbz') || lower.endsWith('.tbz2')) {
+    command = `tar -tjf ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.tar.xz') || lower.endsWith('.txz')) {
+    command = `tar -tJf ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.tar')) {
+    command = `tar -tf ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.zip')) {
+    command = `command -v unzip >/dev/null 2>&1 || { echo '服务器没有 unzip 命令'; exit 127; }; unzip -l ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.7z')) {
+    command = `command -v 7z >/dev/null 2>&1 || { echo '服务器没有 7z 命令'; exit 127; }; 7z l ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.rar')) {
+    command = `command -v unrar >/dev/null 2>&1 || { echo '服务器没有 unrar 命令'; exit 127; }; unrar l ${quoted} | sed -n '1,5000p'`
+  } else if (lower.endsWith('.gz')) {
+    command = `gzip -l ${quoted}`
+  } else if (lower.endsWith('.xz')) {
+    command = `command -v xz >/dev/null 2>&1 || { echo '服务器没有 xz 命令'; exit 127; }; xz -l ${quoted}`
+  } else if (lower.endsWith('.bz2')) {
+    command = `command -v bzip2 >/dev/null 2>&1 || { echo '服务器没有 bzip2 命令'; exit 127; }; ls -lh ${quoted}; bzip2 -tv ${quoted} 2>&1`
+  } else {
+    throw new Error('unsupported archive format')
   }
+
+  const result = await execRemote(alias, command)
+  return result.stdout.trim() || result.stderr.trim() || '（压缩包为空或没有可显示的目录信息）'
 }
