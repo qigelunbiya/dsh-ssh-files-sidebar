@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Integrated DSH Remote SSH workspace, SSH operations UI and VSCode-like remote file explorer/editor.",
   "type": "module",
   "license": "MIT",
@@ -32,6 +32,7 @@
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-workspace",
         "@deepseek-ai/dsh-client-ui-slots"
       ],
@@ -81,6 +82,9 @@
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-client-locale": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.8",
+    "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.8",
     "@types/node": "^24.0.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.1",
