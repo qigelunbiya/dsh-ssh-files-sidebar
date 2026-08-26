@@ -24,11 +24,27 @@ function installSshFilesContextMenuPositionFix(): () => void {
     return null
   }
 
+  const normalizeMenu = (menu: HTMLElement): void => {
+    for (const button of Array.from(menu.querySelectorAll<HTMLButtonElement>('button'))) {
+      const label = (button.textContent ?? '').trim()
+      // Left-clicking a file already opens its preview/editor, so repeating the
+      // same action in the context menu adds noise without adding capability.
+      if (label === '打开 / 预览 / 编辑') {
+        button.style.display = 'none'
+        continue
+      }
+      // Rename still edits inline; the implementation detail does not need to
+      // be shown to the operator in the menu label.
+      if (label === '重命名（原地编辑）') button.textContent = '重命名'
+    }
+  }
+
   const correct = (): void => {
     if (point === null) return
     const menu = findMenu()
     if (menu === null) return
 
+    normalizeMenu(menu)
     const rect = menu.getBoundingClientRect()
     const margin = 6
     const wantedX = Math.max(margin, Math.min(point.x, window.innerWidth - rect.width - margin))
