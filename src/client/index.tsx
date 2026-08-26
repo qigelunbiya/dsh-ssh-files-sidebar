@@ -1,10 +1,8 @@
-import type {} from 'dsh-better-sidebar/client/service'
-import type { Context } from 'cordis'
 import { RemoteFilesTab } from './RemoteFilesTab.tsx'
 
 export const inject = ['betterSidebar']
 
-export function apply(ctx: Context): void {
+export function apply(ctx: any): void {
   ctx.effect(() => ctx.betterSidebar.registerTab({
     id: 'dsh-ssh-files-sidebar:files',
     title: 'SSH Files',

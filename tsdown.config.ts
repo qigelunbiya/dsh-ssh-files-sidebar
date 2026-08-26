@@ -1,5 +1,7 @@
 import type { UserConfig } from 'tsdown'
 
+const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client']
+
 export default [
   {
     entry: { index: 'src/index.ts' },
@@ -18,8 +20,8 @@ export default [
     dts: false,
     sourcemap: true,
     clean: false,
-    external: ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', 'cordis', 'dsh-better-sidebar/client/service'],
-    noExternal: (id: string) => ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', 'cordis', 'dsh-better-sidebar/client/service'].includes(id) ? undefined : true,
+    external: CLIENT_EXTERNALS,
+    noExternal: (id: string) => CLIENT_EXTERNALS.includes(id) ? undefined : true,
     outputOptions: {
       entryFileNames: 'client.js',
       banner: 'window.__ModuleLoader__.load({ id: "dsh-ssh-files-sidebar", factory: (require) => {',
