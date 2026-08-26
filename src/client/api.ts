@@ -23,6 +23,11 @@ export interface ExecResult {
   error?: string
 }
 
+export interface GitStatusSnapshot {
+  root: string
+  entries: Array<{ status: string; path: string }>
+}
+
 const BASE = '/api/dsh-ssh'
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -135,4 +140,42 @@ export async function deleteRemotePath(alias: string, path: string, isDirectory:
   await execRemote(alias, isDirectory
     ? `rm -rf -- ${shellQuote(path)}`
     : `rm -f -- ${shellQuote(path)}`)
+}
+
+/**
+ * Resolve the nearest git worktree for a file/directory and return porcelain-v1
+ * status entries. A non-git path resolves to null rather than surfacing an error.
+ */
+export async function readGitStatus(alias: string, path: string, isDirectory: boolean): Promise<GitStatusSnapshot | null> {
+  const dir = isDirectory ? path : path.replace(/\/+[^/]+$/, '') || '/'
+  const command = [
+    `root=$(git -C ${shellQuote(dir)} rev-parse --show-toplevel 2>/dev/null) || exit 17`,
+    `printf '__DSH_GIT_ROOT__%s\\n' "$root"`,
+    `git -C "$root" status --porcelain=v1 --untracked-files=all`,
+  ].join('; ')
+
+  try {
+    const result = await execRemote(alias, command)
+    const lines = result.stdout.replace(/\r/g, '').split('\n')
+    const rootLine = lines.shift() ?? ''
+    if (!rootLine.startsWith('__DSH_GIT_ROOT__')) return null
+    const root = rootLine.slice('__DSH_GIT_ROOT__'.length).trim()
+    if (root === '') return null
+    const entries: GitStatusSnapshot['entries'] = []
+    for (const line of lines) {
+      if (line.length < 4) continue
+      const status = line.slice(0, 2)
+      let relative = line.slice(3)
+      const arrow = relative.lastIndexOf(' -> ')
+      if (arrow >= 0) relative = relative.slice(arrow + 4)
+      relative = relative.replace(/^"|"$/g, '')
+      const absolute = root === '/' ? `/${relative}` : `${root.replace(/\/$/, '')}/${relative}`
+      entries.push({ status, path: absolute })
+    }
+    return { root, entries }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (/exit code 17|not a git repository/i.test(message)) return null
+    throw error
+  }
 }
