@@ -54,7 +54,7 @@
     "bundle": "tsdown"
   },
   "dependencies": {
-    "@linxin666/dsh-ssh": "0.1.16",
+    "@linxin666/dsh-ssh": "0.3.4",
     "dsh-rw": "https://github.com/MDR-EX1000/dsh-rw/releases/latest/download/dsh-rw.tgz",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-cpp": "^6.0.3",
