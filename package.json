@@ -1,7 +1,7 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.3.0",
-  "description": "A dsh-better-sidebar SSH file tree and editor that reuses hosts and SFTP APIs from @linxin666/dsh-ssh.",
+  "version": "0.4.0",
+  "description": "Integrated DSH Remote SSH workspace, SSH operations UI and VSCode-like remote file explorer/editor.",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -31,7 +31,9 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime"
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-slots"
       ],
       "platform": "web"
     }
@@ -43,7 +45,8 @@
     "src",
     "cordis.patch.yml",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown",
@@ -51,6 +54,8 @@
     "bundle": "tsdown"
   },
   "dependencies": {
+    "@linxin666/dsh-ssh": "0.1.16",
+    "dsh-rw": "0.4.1",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
