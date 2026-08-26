@@ -1,7 +1,6 @@
-# One top-level plugin installs both the original @linxin666/dsh-ssh engine/UI
-# and this integrated remote-workspace + right-side explorer layer.
+# One top-level loader row only. The package itself composes the host/client
+# halves of @linxin666/dsh-ssh, so the profile does not need (and must not try)
+# to resolve @linxin666/dsh-ssh as a second top-level dependency.
 - insert:
-    - id: ssh
-      name: '@linxin666/dsh-ssh'
     - id: ssh-files-sidebar
       name: 'dsh-ssh-files-sidebar'
