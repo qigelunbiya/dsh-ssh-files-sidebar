@@ -1,7 +1,7 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.1.0",
-  "description": "A dsh-better-sidebar SSH file tree that reuses hosts and SFTP APIs from @linxin666/dsh-ssh.",
+  "version": "0.2.0",
+  "description": "A dsh-better-sidebar SSH file tree and editor that reuses hosts and SFTP APIs from @linxin666/dsh-ssh.",
   "type": "module",
   "license": "MIT",
   "repository": {
