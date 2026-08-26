@@ -1,0 +1,17 @@
+dsh-ssh-files-sidebar
+
+This project integrates with and depends on the following open-source projects:
+
+1. @linxin666/dsh-ssh
+   Source: https://github.com/DamonKoy/dsh-web-ui/tree/main/packages/dsh-ssh
+   License: Apache License 2.0
+   Provides the SSH host store, SSH/SFTP engine, web terminal, transfer/tunnel UI,
+   HTTP/WebSocket routes, and agent SSH tools.
+
+2. dsh-rw
+   Source: https://github.com/MDR-EX1000/dsh-rw
+   License: MIT
+   Provides the remote-workspace placeholder model, workspace routes, rw_* tools,
+   and native-tool remote shim used by this integrated plugin.
+
+The dependency projects retain their respective copyrights and license terms.
