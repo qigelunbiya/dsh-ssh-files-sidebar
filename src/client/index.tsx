@@ -1,4 +1,4 @@
-import { apply as applySshClient } from '@linxin666/dsh-ssh/src/client/index.ts'
+import { apply as applySshClient } from './embedded-ssh-client.js'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
 
