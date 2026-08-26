@@ -1,11 +1,20 @@
+import { apply as applySshClient } from '@linxin666/dsh-ssh/src/client/index.ts'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
 
-export const inject = ['betterSidebar', 'slots']
+// We compose the original dsh-ssh browser UI inside this one client plugin, so
+// wait for the services needed by both dsh-ssh and our better-sidebar/workspace UI.
+export const inject = ['betterSidebar', 'slots', 'locale']
 
 export function apply(ctx: any): void {
-  // Replace the raw native directory picker entry with an explicit Local / Remote SSH chooser.
-  // The Remote tab uses dsh-rw's workspace route, which is mounted by this same package's host half.
+  // Original dsh-ssh browser surfaces: left SSH entry + center host/terminal/
+  // transfer/tunnel/cluster panel. This shares the host half mounted by our
+  // package root and therefore the same ~/.dsh/dsh-ssh.json configuration.
+  applySshClient(ctx)
+
+  // Replace the raw native directory picker entry with an explicit Local /
+  // Remote SSH chooser. The Remote tab uses dsh-rw's workspace route, mounted
+  // by this same package's host half.
   registerWorkspaceDirectoryFlow(ctx)
 
   ctx.effect(() => ctx.betterSidebar.registerTab({
