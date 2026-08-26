@@ -115,7 +115,9 @@ function readRememberedExpanded(sessionId: string, alias: string): string[] {
     if (raw === null) return []
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed.filter((value): value is string => typeof value === 'string' && value.startsWith('/') && value !== '/').slice(0, RESTORE_LIMIT)
+    return parsed
+      .filter((value): value is string => typeof value === 'string' && value.startsWith('/') && value !== '/')
+      .slice(0, RESTORE_LIMIT)
   } catch {
     return []
   }
@@ -310,12 +312,11 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     setPreviewUrl('')
   }
 
-  const setBlobPreview = (blob: Blob): string => {
+  const setBlobPreview = (blob: Blob): void => {
     revokePreviewUrl()
     const url = URL.createObjectURL(blob)
     objectUrlRef.current = url
     setPreviewUrl(url)
-    return url
   }
 
   const clearPreview = (): void => {
@@ -411,7 +412,8 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     setLoading(prev => ({ ...prev, [path]: true }))
     setErrors(prev => ({ ...prev, [path]: undefined }))
     try {
-      setLoaded(prev => ({ ...prev, [path]: sortEntries(await listRemoteDir(alias, path)) }))
+      const entries = sortEntries(await listRemoteDir(alias, path))
+      setLoaded(prev => ({ ...prev, [path]: entries }))
     } catch (error) {
       setErrors(prev => ({ ...prev, [path]: error instanceof Error ? error.message : String(error) }))
     } finally {
@@ -421,7 +423,11 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
 
   const openFile = async (item: SelectedItem): Promise<void> => {
     if (alias === '' || item.entry.type !== 'file') return
-    if (previewPath !== item.path && !confirmDiscard()) return
+    if (previewPath === item.path && previewKind !== 'none') {
+      setSelected(item)
+      return
+    }
+    if (!confirmDiscard()) return
 
     setSelected(item)
     revokePreviewUrl()
