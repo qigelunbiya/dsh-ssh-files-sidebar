@@ -1,0 +1,3 @@
+- insert:
+    - id: ssh-files-sidebar
+      name: 'dsh-ssh-files-sidebar'
