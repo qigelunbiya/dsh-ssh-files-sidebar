@@ -8,6 +8,6 @@ export function apply(ctx: any): void {
     title: 'SSH Files',
     order: 15,
     single: true,
-    component: () => <RemoteFilesTab />,
+    component: ({ scope }: any) => <RemoteFilesTab sessionId={scope?.sessionId ?? 'global'} />,
   }), 'dsh-ssh-files-sidebar: register tab')
 }
