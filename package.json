@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A dsh-better-sidebar SSH file tree and editor that reuses hosts and SFTP APIs from @linxin666/dsh-ssh.",
   "type": "module",
   "license": "MIT",
@@ -49,6 +49,26 @@
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
     "bundle": "tsdown"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/lang-cpp": "^6.0.3",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-go": "^6.0.1",
+    "@codemirror/lang-html": "^6.4.12",
+    "@codemirror/lang-java": "^6.0.2",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/lang-python": "^6.2.2",
+    "@codemirror/lang-rust": "^6.0.2",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/lang-yaml": "^6.3.0",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.38.5"
   },
   "peerDependencies": {
     "dsh-better-sidebar": "^0.16.1",
