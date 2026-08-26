@@ -1,3 +1,7 @@
+# One top-level plugin installs both the original @linxin666/dsh-ssh engine/UI
+# and this integrated remote-workspace + right-side explorer layer.
 - insert:
+    - id: ssh
+      name: '@linxin666/dsh-ssh'
     - id: ssh-files-sidebar
       name: 'dsh-ssh-files-sidebar'
