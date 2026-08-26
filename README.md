@@ -1,48 +1,59 @@
 # dsh-ssh-files-sidebar
 
-把 `@linxin666/dsh-ssh` 已经配置好的 SSH 主机直接显示到 `dsh-better-sidebar` 右侧栏，不再配置第二份 SSH。
+一个面向 DeepSeek Harness 的一体化 Remote SSH 插件层：把 `@linxin666/dsh-ssh` 的 SSH 运维能力、`dsh-rw` 的远程工作区/原生工具 Shim，以及 `dsh-better-sidebar` 里的远程文件树/编辑器组合到同一套体验里。
 
-## 当前功能
+> 0.4.0 起，用户只维护一份 SSH 主机配置：`~/.dsh/dsh-ssh.json`。不再需要同时在 `@linxin666/dsh-ssh` 和 `dsh-rw` 各配一遍服务器。
 
-- 复用 `@linxin666/dsh-ssh` 的主机配置、SSH/SFTP 连接和同源 API
-- 单主机自动选择，多主机下拉切换
-- 从远程 `/` 根目录开始浏览
-- 文件夹按需展开，避免递归扫描整台服务器
-- 文件夹优先、文件其次，显示文件大小和修改时间
-- CodeMirror 编辑器：行号、语法高亮、当前行高亮、括号匹配、代码折叠
-- CodeMirror 搜索 / 替换：点击“搜索”或使用 `Ctrl+F`
-- `Ctrl+S` / `Cmd+S` 直接保存远程文件
-- 支持 HTML、Python、JS/TS、JSON/YAML、Markdown、CSS、SQL、C/C++、Java、Go、Rust、XML 等常见语言高亮
-- HTML 支持“源码 / 预览”切换，预览使用 sandbox iframe
-- 图片支持侧栏内预览，PDF 支持浏览器内嵌预览
-- 文本编辑后直接通过 SFTP 保存回服务器，并显示未保存状态
-- 切换文件、切换主机或关闭编辑器时，有未保存修改会提醒
-- 文件下载
-- 上传一个或多个文件到当前目录；存在同名文件时先确认再覆盖
-- 新建目录
-- 文件/目录重命名
-- 文件/目录删除（删除前二次确认）
-- 文件和目录右键菜单：打开/编辑、下载、刷新、上传、新建目录、刷新 Git 状态、重命名、删除
-- 文件树空白处右键可对远程 `/` 执行上传、新建目录、刷新和 Git 检测
-- 文件树 / 编辑器之间可拖拽调整高度，并按会话记住比例
-- Git 状态标记：在 Git 工作树内选中文件或目录后自动读取 `git status --porcelain`，文件显示 `M/A/D/R/U/?`，有改动的父目录显示 `•`
-- 每个 DSH 会话分别记住：上次选择的 SSH 主机、上次展开的远程目录、文件树/编辑器分割比例
-- SSH/SFTP/Git 错误只显示在侧栏，不影响主聊天
+## 0.4.0 主要变化
 
-## 前置插件
+- 顶层插件会自动激活 `@linxin666/dsh-ssh`，保留原来的 SSH 主机管理、Web Terminal、SFTP、隧道和 Agent SSH 工具。
+- 内部挂载 `dsh-rw` 的远程 Workspace 路由、`rw_*` 工具和原生工具 Shim，但它读取同一份 `~/.dsh/dsh-ssh.json`。
+- “添加工作区”恢复为明确的 **本机 / 远程 SSH** 两个选项；只有主动选择本机时才会打开 Windows 系统文件夹选择器。
+- `SSH Files` 只对 `dsh-rw` 远程工作区开放；普通本机工作区不会再沿用上一会话的 131 文件树。
+- Git 状态功能和 Git 按钮全部移除。
+- PNG/JPG/GIF/WebP/BMP/ICO/AVIF 图片预览修正 MIME 后再显示。
+- TAR/TGZ/TAR.GZ/TAR.BZ2/TAR.XZ/ZIP/GZ/BZ2/XZ/7Z/RAR 支持查看压缩包目录/元信息；具体格式依赖服务器上的 `tar` / `gzip` / `unzip` / `7z` / `unrar` 等命令。
+- `Ctrl/Cmd + 点击` 增减多选，`Shift + 点击` 范围多选，树获得焦点后 `Ctrl+A` 可选择当前已展开的可见项目。
+- 多选后可批量删除，也可连续触发多个文件下载。
+- 重命名改成文件树中的**原地编辑**，不再弹浏览器 prompt；也支持 `F2`。
+- `Delete` 可删除当前选择。
+- 右键文件/目录继续提供常用文件操作；多选时右键已选中的项目会保留整组选择。
+- CodeMirror 编辑器继续支持语法高亮、行号、搜索替换、`Ctrl+S` 保存。
+- 文件树 / 编辑器高度可拖拽调整，并按 DSH 会话记忆。
+- 每个远程会话继续分别记住上次展开的目录。
 
-需要已安装并启用：
+## 架构
 
 ```text
-@linxin666/dsh-ssh
-dsh-better-sidebar
+一个顶层安装：dsh-ssh-files-sidebar
+│
+├─ @linxin666/dsh-ssh
+│  ├─ ~/.dsh/dsh-ssh.json   ← 唯一 SSH 主机/凭据配置
+│  ├─ SSH 主机管理 UI
+│  ├─ Web Terminal / SFTP / Tunnel
+│  └─ /api/dsh-ssh/* + ssh_* Agent tools
+│
+├─ dsh-rw（内部复用）
+│  ├─ 添加工作区：本机 / 远程 SSH
+│  ├─ ~/.dsh/remote-workspaces/<alias>/<name> 占位 Workspace
+│  ├─ rw_* tools
+│  └─ Read / Write / Edit / Glob / Grep / Bash 透明远程 Shim
+│
+└─ SSH Files
+   ├─ 只在远程 Workspace 可打开
+   ├─ 远程文件树
+   ├─ CodeMirror 编辑/保存
+   ├─ 图片/PDF/压缩包预览
+   ├─ 多选
+   ├─ 上传/下载
+   ├─ 原地重命名
+   ├─ 新建目录/删除
+   └─ 会话级目录展开记忆
 ```
 
-SSH 主机只需要在 `@linxin666/dsh-ssh` 中配置一次。
+`dsh-better-sidebar` 仍然是右侧工作台框架，需要启用；SSH 和远程工作区本身则由本项目一次安装带入。
 
-## 本地开发安装 / 更新
-
-首次安装：
+## 首次安装
 
 ```powershell
 git clone https://github.com/qigelunbiya/dsh-ssh-files-sidebar.git
@@ -58,98 +69,126 @@ pnpm dsh plugin --profile web add link:E:/你的路径/dsh-ssh-files-sidebar
 pnpm dsh web
 ```
 
-已经使用 `link:` 安装后，更新只需要：
+## 从 0.3.x 升级到 0.4.x
+
+0.4.x 已经会自己激活 `@linxin666/dsh-ssh`，并且内部接入 `dsh-rw`。为了避免重复插件 row、重复 API route 或两套 Shim，先把 profile 中**单独安装**的旧条目移除：
 
 ```powershell
-cd E:\你的路径\dsh-ssh-files-sidebar
+cd E:\fangzeming\deepseekHarness\deepseek-harness
+
+pnpm dsh plugin --profile web remove @linxin666/dsh-ssh
+pnpm dsh plugin --profile web remove dsh-rw
+```
+
+如果其中某条提示没有安装，可以忽略。
+
+随后更新本项目：
+
+```powershell
+cd E:\fangzeming\deepseekHarness\dsh-ssh-files-sidebar
+
 git pull
 pnpm install
 pnpm build
+```
 
-cd E:\你的路径\deepseek-harness
+因为 0.4.0 新增了集成依赖，建议让 DSH profile 对 `link:` 再同步一次依赖：
+
+```powershell
+cd E:\fangzeming\deepseekHarness\deepseek-harness
+
+pnpm dsh plugin --profile web add link:E:/fangzeming/deepseekHarness/dsh-ssh-files-sidebar
 pnpm dsh web
 ```
 
-> 从 0.2.x 升级到 0.3.x 需要重新执行一次 `pnpm install`，因为新增了 CodeMirror 依赖。以后代码更新如果依赖没有变化，可以只 `git pull && pnpm build`。
+浏览器启动后执行一次硬刷新：`Ctrl + Shift + R`。
 
-启动后，在 `dsh-better-sidebar` 右侧栏的 `+` 菜单中打开 **SSH Files**。
+> 原来 `@linxin666/dsh-ssh` 保存的 `~/.dsh/dsh-ssh.json` 不需要删除，也不需要重新配置服务器。0.4.0 正是复用这份配置。
 
-## 右键菜单
+## 工作区使用方式
 
-文件：
+点击“添加工作区”后会出现两个选项：
+
+- **本机**：手动输入本机路径，或点击按钮后再打开 Windows 系统目录选择器。
+- **远程 SSH**：直接读取左侧 SSH 已经配置的主机，选服务器、浏览远程目录并设为 Workspace。
+
+创建远程 Workspace 后，DSH 的会话 cwd 是本机的轻量占位目录，但 Agent 的 `Read/Write/Edit/Glob/Grep/Bash` 会由 dsh-rw Shim 自动转发到对应服务器；远程文件仍以服务器为 source of truth，不做本地镜像。
+
+`SSH Files` 会根据当前会话的远程 Workspace 自动绑定服务器。例如当前 Workspace 属于 `131`，右侧只能显示 `131`；切到普通本机 Workspace 后，`SSH Files` 不会出现在可打开列表中，已有 Tab 也只显示“仅远程工作区可用”的提示。
+
+## 文件树操作
+
+单选：直接点击。
+
+多选：
 
 ```text
-打开 / 编辑
-下载
-刷新目录
-刷新 Git 状态
-重命名
-删除
+Ctrl/Cmd + 点击   增加/取消一个项目
+Shift + 点击      从锚点到当前项目范围选择
+Ctrl/Cmd + A      选择当前文件树已经展开并可见的项目
 ```
 
-目录：
+快捷键：
+
+```text
+F2       原地重命名
+Delete   删除当前选择
+Ctrl+S   保存编辑文件
+Ctrl+F   CodeMirror 搜索/替换
+```
+
+右键文件：
+
+```text
+打开 / 预览 / 编辑
+下载（多选时下载选中的文件）
+刷新所在目录
+重命名（原地编辑）
+删除（多选时删除选中的项目）
+```
+
+右键目录：
 
 ```text
 刷新目录
 上传文件到这里
 新建目录
-刷新 Git 状态
-重命名
+重命名（原地编辑）
 删除
 ```
 
-文件树空白区域代表远程 `/`，右键可以刷新、上传、新建目录和检测 Git 状态。
+文件树空白区域代表远程 `/`，可右键刷新、上传和新建目录。
 
-## Git 状态
+## 预览和编辑
 
-当选中的文件或目录位于 Git 工作树中时，插件会调用远程：
+文本文件：CodeMirror 编辑器，支持常见语言的语法高亮、行号、搜索替换、代码折叠和远程保存。
 
-```text
-git rev-parse --show-toplevel
-git status --porcelain=v1 --untracked-files=all
-```
+HTML：可在“源码 / 预览”之间切换；HTML 预览使用 sandbox iframe。
 
-状态标记：
+图片：PNG/JPG/JPEG/GIF/WebP/BMP/ICO/AVIF 在侧栏中显示。
 
-```text
-M  modified
-A  added
-D  deleted
-R  renamed
-U  conflict/unmerged
-?  untracked
-•  目录下存在 Git 变更
-```
+PDF：浏览器内嵌预览。
 
-保存、上传、重命名、删除、新建目录后会重新刷新所在工作树的状态。非 Git 目录不会报错，只会清空 Git 标记。
+压缩包：不把整个归档解压到浏览器，而是在远程服务器读取目录或压缩信息并显示。常见 `.tar.gz` / `.tgz` 在 Linux 上通常只依赖 `tar`；ZIP/7Z/RAR 若服务器缺对应命令，会显示明确错误，不会修改压缩包。
 
-## 原理
+自动文本预览默认限制 8 MB，图片/PDF 自动预览默认限制 64 MB；超限文件仍可下载。
 
-本插件不维护 SSH 密码和连接配置。浏览器侧复用 `@linxin666/dsh-ssh` 已公开的接口：
+## SSH 配置与安全
+
+唯一 SSH 配置源是：
 
 ```text
-GET  /api/dsh-ssh/hosts
-GET  /api/dsh-ssh/ls
-GET  /api/dsh-ssh/download
-POST /api/dsh-ssh/upload
-POST /api/dsh-ssh/exec
+~/.dsh/dsh-ssh.json
 ```
 
-用途：
+由 `@linxin666/dsh-ssh` 负责主机管理和原有 SSH UI。远程 Workspace 侧通过兼容适配器读取同一文件，因此不需要再维护 `~/.dsh/dsh-rw.json` 的第二份主机列表。
 
-- `hosts`：读取已经配置好的 SSH 主机
-- `ls`：远程目录树
-- `download`：文件预览和下载
-- `upload`：编辑保存、上传本地文件
-- `exec`：执行短文件系统/Git 命令，用于 mkdir / mv / rm / git status
+删除目录会执行远程 `rm -rf -- <path>`，UI 会先要求确认；文件操作权限与当前 SSH 登录用户一致。重命名和新建目录分别通过远程 `mv` / `mkdir` 完成。
 
-因此主机配置、认证方式、ProxyJump 与连接池仍然全部由 `@linxin666/dsh-ssh` 负责。
+## 上游依赖
 
-## 安全与限制
+- `@linxin666/dsh-ssh`：Apache-2.0，来源 `DamonKoy/dsh-web-ui/packages/dsh-ssh`
+- `dsh-rw`：MIT，来源 `MDR-EX1000/dsh-rw`
+- `dsh-better-sidebar`：右侧 Sidebar 框架
 
-- 删除目录使用远程 `rm -rf -- <path>`，UI 会先弹出确认框；服务器权限与 SSH 登录用户一致。
-- 重命名和新建目录通过远程 `mv` / `mkdir` 执行。
-- 自动文本预览默认限制 8 MB，图片/PDF 自动预览默认限制 32 MB，避免大文件拖慢浏览器；大文件仍可下载。
-- HTML 预览使用 sandbox iframe，不允许页面脚本继承 DSH 页面权限。
-- Git 标记面向普通工作树状态；极少见的包含换行符的 Git 文件名不做特殊解析。
-- Git 状态只在进入/选中某个 Git 工作树后显示，不会递归扫描整台服务器寻找仓库。
+更完整的归属信息见 `NOTICE`。
