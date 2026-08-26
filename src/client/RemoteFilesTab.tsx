@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
-import type { GitStatusSnapshot, RemoteDirEntry, SshHostSummary } from './api.ts'
+import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react'
+import type { RemoteDirEntry, SshHostSummary } from './api.ts'
 import {
   createRemoteDirectory,
   deleteRemotePath,
   listHosts,
   listRemoteDir,
-  readGitStatus,
+  readArchiveListing,
   readRemoteFile,
   renameRemotePath,
   writeRemoteFile,
@@ -17,9 +17,9 @@ type LoadedDirs = Record<string, RemoteDirEntry[]>
 type Expanded = Record<string, boolean>
 type LoadingMap = Record<string, boolean>
 type ErrorMap = Record<string, string | undefined>
-type GitMarks = Record<string, string>
+type SelectionMap = Record<string, SelectedItem>
 
-type PreviewKind = 'none' | 'loading' | 'text' | 'image' | 'pdf' | 'binary' | 'too-large' | 'error'
+type PreviewKind = 'none' | 'loading' | 'text' | 'image' | 'pdf' | 'archive' | 'binary' | 'too-large' | 'error'
 
 interface SelectedItem {
   path: string
@@ -29,6 +29,7 @@ interface SelectedItem {
 
 interface RemoteFilesTabProps {
   sessionId?: string
+  workspaceCwd?: string
 }
 
 interface ContextMenuState {
@@ -39,8 +40,8 @@ interface ContextMenuState {
 }
 
 const TEXT_PREVIEW_LIMIT = 8 * 1024 * 1024
-const MEDIA_PREVIEW_LIMIT = 32 * 1024 * 1024
-const RESTORE_LIMIT = 80
+const MEDIA_PREVIEW_LIMIT = 64 * 1024 * 1024
+const RESTORE_LIMIT = 100
 
 const TEXT_EXTENSIONS = new Set([
   'txt', 'log', 'md', 'markdown', 'html', 'htm', 'css', 'scss', 'less',
@@ -53,6 +54,19 @@ const TEXT_EXTENSIONS = new Set([
 ])
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif'])
+const ARCHIVE_SUFFIXES = ['.tar.gz', '.tar.bz2', '.tar.xz', '.tgz', '.tbz', '.tbz2', '.txz', '.tar', '.zip', '.7z', '.rar', '.gz', '.bz2', '.xz']
+
+/** dsh-rw placeholder cwd -> SSH alias. Local workspaces return null. */
+export function remoteWorkspaceAliasFromCwd(cwd?: string): string | null {
+  if (!cwd) return null
+  const normalized = cwd.replace(/\\/g, '/')
+  const marker = '/.dsh/remote-workspaces/'
+  const index = normalized.toLowerCase().indexOf(marker)
+  if (index < 0) return null
+  const tail = normalized.slice(index + marker.length)
+  const alias = tail.split('/')[0]?.trim() ?? ''
+  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(alias) ? alias : null
+}
 
 function sortEntries(entries: RemoteDirEntry[]): RemoteDirEntry[] {
   return [...entries].sort((a, b) => {
@@ -92,6 +106,25 @@ function isHtml(path: string): boolean {
   return ext === 'html' || ext === 'htm'
 }
 
+function isArchive(path: string): boolean {
+  const lower = path.toLowerCase()
+  return ARCHIVE_SUFFIXES.some(suffix => lower.endsWith(suffix))
+}
+
+function imageMime(path: string): string {
+  switch (extensionOf(path)) {
+    case 'png': return 'image/png'
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg'
+    case 'gif': return 'image/gif'
+    case 'webp': return 'image/webp'
+    case 'bmp': return 'image/bmp'
+    case 'ico': return 'image/x-icon'
+    case 'avif': return 'image/avif'
+    default: return 'application/octet-stream'
+  }
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
@@ -105,23 +138,11 @@ function formatTime(ms: number): string {
 }
 
 function expandedStorageKey(sessionId: string, alias: string): string {
-  return `dsh-ssh-files-sidebar:v3:${sessionId}:${alias}:expanded`
-}
-
-function hostStorageKey(sessionId: string): string {
-  return `dsh-ssh-files-sidebar:v3:${sessionId}:host`
+  return `dsh-ssh-files-sidebar:v4:${sessionId}:${alias}:expanded`
 }
 
 function splitStorageKey(sessionId: string): string {
-  return `dsh-ssh-files-sidebar:v3:${sessionId}:split`
-}
-
-function readRememberedHost(sessionId: string): string {
-  try { return localStorage.getItem(hostStorageKey(sessionId)) ?? '' } catch { return '' }
-}
-
-function writeRememberedHost(sessionId: string, alias: string): void {
-  try { localStorage.setItem(hostStorageKey(sessionId), alias) } catch { /* storage unavailable */ }
+  return `dsh-ssh-files-sidebar:v4:${sessionId}:split`
 }
 
 function readRememberedExpanded(sessionId: string, alias: string): string[] {
@@ -196,29 +217,29 @@ async function blobLooksLikeText(blob: Blob): Promise<boolean> {
   return replacements <= Math.max(2, decoded.length * 0.01)
 }
 
-function statusLabel(status: string): string {
-  if (status === '??') return '?'
-  if (status.includes('U')) return 'U'
-  if (status.includes('R')) return 'R'
-  if (status.includes('D')) return 'D'
-  if (status.includes('A')) return 'A'
-  if (status.includes('M')) return 'M'
-  return status.trim().slice(0, 1) || '•'
+function flattenVisible(rootEntries: RemoteDirEntry[], expanded: Expanded, loaded: LoadedDirs): SelectedItem[] {
+  const result: SelectedItem[] = []
+  const walk = (entries: RemoteDirEntry[], parent: string): void => {
+    for (const entry of entries) {
+      const path = joinPath(parent, entry.name)
+      result.push({ path, parentPath: parent, entry })
+      if (entry.type === 'dir' && expanded[path] && loaded[path]) walk(loaded[path]!, path)
+    }
+  }
+  walk(rootEntries, '/')
+  return result
 }
 
-function gitBadge(path: string, isDirectory: boolean, marks: GitMarks): string {
-  const exact = marks[path]
-  if (exact !== undefined) return statusLabel(exact)
-  if (isDirectory && Object.keys(marks).some(candidate => pathWithin(candidate, path))) return '•'
-  return ''
-}
-
-function gitBadgeColor(label: string): string {
-  if (label === 'A' || label === '?') return '#2e8b57'
-  if (label === 'D' || label === 'U') return '#d9534f'
-  if (label === 'R') return '#7b61a8'
-  if (label === 'M' || label === '•') return '#d98c00'
-  return 'inherit'
+function collapseDeleteTargets(items: SelectedItem[]): SelectedItem[] {
+  const paths = new Set(items.map(item => item.path))
+  return items.filter(item => {
+    let parent = item.parentPath
+    while (parent !== '/') {
+      if (paths.has(parent)) return false
+      parent = parentOf(parent)
+    }
+    return !paths.has('/')
+  }).sort((a, b) => b.path.length - a.path.length)
 }
 
 function FolderIcon({ open }: { open: boolean }) {
@@ -238,46 +259,44 @@ interface TreeNodeProps {
   loaded: LoadedDirs
   loading: LoadingMap
   errors: ErrorMap
-  gitMarks: GitMarks
-  selectedPath?: string
-  onToggle: (path: string) => void
-  onSelect: (item: SelectedItem) => void
-  onOpenFile: (item: SelectedItem) => void
+  selectedPaths: ReadonlySet<string>
+  renamingPath: string | null
+  renameDraft: string
+  onClick: (event: ReactMouseEvent<HTMLButtonElement>, item: SelectedItem) => void
   onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>, item: SelectedItem) => void
+  onRenameDraft: (value: string) => void
+  onRenameCommit: (item: SelectedItem) => void
+  onRenameCancel: () => void
 }
 
 function TreeNode(props: TreeNodeProps) {
   const {
-    alias, path, depth, entry, expanded, loaded, loading, errors, gitMarks,
-    selectedPath, onToggle, onSelect, onOpenFile, onContextMenu,
+    alias, path, depth, entry, expanded, loaded, loading, errors, selectedPaths,
+    renamingPath, renameDraft, onClick, onContextMenu, onRenameDraft, onRenameCommit, onRenameCancel,
   } = props
   const fullPath = joinPath(path, entry.name)
   const item: SelectedItem = { path: fullPath, parentPath: path, entry }
   const isDir = entry.type === 'dir'
   const isOpen = isDir && expanded[fullPath] === true
   const children = loaded[fullPath]
-  const selected = selectedPath === fullPath
-  const badge = gitBadge(fullPath, isDir, gitMarks)
+  const selected = selectedPaths.has(fullPath)
+  const renaming = renamingPath === fullPath
 
   return (
     <div>
       <button
         type="button"
-        onClick={() => {
-          onSelect(item)
-          if (isDir) onToggle(fullPath)
-          else if (entry.type === 'file') onOpenFile(item)
-        }}
-        onContextMenu={event => onContextMenu(event, item)}
+        onClick={event => { if (!renaming) onClick(event, item) }}
+        onContextMenu={event => { if (!renaming) onContextMenu(event, item) }}
         title={`${fullPath}${entry.mtimeMs > 0 ? `\n${formatTime(entry.mtimeMs)}` : ''}`}
         style={{
           width: '100%',
           border: 0,
-          background: selected ? 'rgba(90,130,255,.14)' : 'transparent',
+          background: selected ? 'rgba(90,130,255,.16)' : 'transparent',
           color: 'inherit',
           display: 'grid',
-          gridTemplateColumns: 'minmax(0,1fr) auto auto',
-          gap: 7,
+          gridTemplateColumns: 'minmax(0,1fr) auto',
+          gap: 8,
           alignItems: 'center',
           padding: `5px 8px 5px ${8 + depth * 14}px`,
           cursor: entry.type === 'other' ? 'default' : 'pointer',
@@ -285,16 +304,32 @@ function TreeNode(props: TreeNodeProps) {
           fontSize: 13,
         }}
       >
-        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 2 }}>
           {isDir ? <FolderIcon open={isOpen} /> : <FileIcon />}
-          {entry.name}
+          {renaming ? (
+            <input
+              autoFocus
+              value={renameDraft}
+              onChange={event => onRenameDraft(event.target.value)}
+              onFocus={event => event.currentTarget.select()}
+              onClick={event => event.stopPropagation()}
+              onMouseDown={event => event.stopPropagation()}
+              onBlur={() => onRenameCommit(item)}
+              onKeyDown={event => {
+                event.stopPropagation()
+                if (event.key === 'Enter') event.currentTarget.blur()
+                if (event.key === 'Escape') {
+                  event.preventDefault()
+                  onRenameCancel()
+                }
+              }}
+              style={{ minWidth: 0, flex: 1, border: '1px solid #6f8cff', borderRadius: 4, background: 'transparent', color: 'inherit', font: 'inherit', padding: '1px 4px', outline: 'none' }}
+            />
+          ) : (
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</span>
+          )}
         </span>
-        {badge !== '' && (
-          <span title={`Git: ${badge}`} style={{ color: gitBadgeColor(badge), fontWeight: 700, fontSize: 11 }}>{badge}</span>
-        )}
-        <span style={{ opacity: 0.58, fontSize: 11, whiteSpace: 'nowrap' }}>
-          {isDir ? '' : formatBytes(entry.size)}
-        </span>
+        <span style={{ opacity: 0.58, fontSize: 11, whiteSpace: 'nowrap' }}>{isDir ? '' : formatBytes(entry.size)}</span>
       </button>
       {isOpen && (
         <div>
@@ -303,20 +338,10 @@ function TreeNode(props: TreeNodeProps) {
           {children?.map(child => (
             <TreeNode
               key={`${alias}:${fullPath}:${child.name}`}
-              alias={alias}
+              {...props}
               path={fullPath}
               depth={depth + 1}
               entry={child}
-              expanded={expanded}
-              loaded={loaded}
-              loading={loading}
-              errors={errors}
-              gitMarks={gitMarks}
-              selectedPath={selectedPath}
-              onToggle={onToggle}
-              onSelect={onSelect}
-              onOpenFile={onOpenFile}
-              onContextMenu={onContextMenu}
             />
           ))}
         </div>
@@ -347,7 +372,8 @@ const menuButtonStyle = {
   fontSize: 12,
 } as const
 
-export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
+export function RemoteFilesTab({ sessionId = 'global', workspaceCwd }: RemoteFilesTabProps) {
+  const boundAlias = useMemo(() => remoteWorkspaceAliasFromCwd(workspaceCwd), [workspaceCwd])
   const [hosts, setHosts] = useState<SshHostSummary[]>([])
   const [alias, setAlias] = useState('')
   const [rootEntries, setRootEntries] = useState<RemoteDirEntry[]>([])
@@ -355,7 +381,8 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
   const [loaded, setLoaded] = useState<LoadedDirs>({})
   const [loading, setLoading] = useState<LoadingMap>({})
   const [errors, setErrors] = useState<ErrorMap>({})
-  const [selected, setSelected] = useState<SelectedItem | null>(null)
+  const [selection, setSelection] = useState<SelectionMap>({})
+  const [primaryPath, setPrimaryPath] = useState<string | null>(null)
   const [topError, setTopError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -365,6 +392,7 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
   const [previewError, setPreviewError] = useState('')
   const [originalText, setOriginalText] = useState('')
   const [draftText, setDraftText] = useState('')
+  const [archiveText, setArchiveText] = useState('')
   const [previewUrl, setPreviewUrl] = useState('')
   const [htmlRendered, setHtmlRendered] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -372,9 +400,8 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [treePercent, setTreePercent] = useState(() => readSplitPercent(sessionId))
-  const [gitRoot, setGitRoot] = useState<string | null>(null)
-  const [gitMarks, setGitMarks] = useState<GitMarks>({})
-  const [gitBusy, setGitBusy] = useState(false)
+  const [renamingPath, setRenamingPath] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
 
   const objectUrlRef = useRef<string | null>(null)
   const noticeTimerRef = useRef<number | null>(null)
@@ -382,8 +409,14 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
   const uploadDirectoryRef = useRef('/')
   const splitContainerRef = useRef<HTMLDivElement | null>(null)
   const editorRef = useRef<CodeEditorHandle | null>(null)
+  const anchorPathRef = useRef<string | null>(null)
+  const renameCommitRef = useRef(false)
 
   const selectedHost = useMemo(() => hosts.find(host => host.alias === alias), [hosts, alias])
+  const selectedPaths = useMemo(() => new Set(Object.keys(selection)), [selection])
+  const selectedItems = useMemo(() => Object.values(selection), [selection])
+  const primary = primaryPath ? selection[primaryPath] ?? null : null
+  const visibleItems = useMemo(() => flattenVisible(rootEntries, expanded, loaded), [rootEntries, expanded, loaded])
   const dirty = previewKind === 'text' && draftText !== originalText
 
   const showNotice = (message: string): void => {
@@ -400,9 +433,10 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     setPreviewUrl('')
   }
 
-  const setBlobPreview = (blob: Blob): void => {
+  const setBlobPreview = (blob: Blob, mime?: string): void => {
     revokePreviewUrl()
-    const url = URL.createObjectURL(blob)
+    const typed = mime && blob.type !== mime ? blob.slice(0, blob.size, mime) : blob
+    const url = URL.createObjectURL(typed)
     objectUrlRef.current = url
     setPreviewUrl(url)
   }
@@ -414,6 +448,7 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     setPreviewError('')
     setOriginalText('')
     setDraftText('')
+    setArchiveText('')
     setHtmlRendered(false)
   }
 
@@ -426,47 +461,38 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
 
   useEffect(() => {
     setTreePercent(readSplitPercent(sessionId))
-  }, [sessionId])
+    setSelection({})
+    setPrimaryPath(null)
+    anchorPathRef.current = null
+    clearPreview()
+  }, [sessionId, workspaceCwd])
 
   useEffect(() => {
+    if (boundAlias === null) {
+      setAlias('')
+      setHosts([])
+      setRootEntries([])
+      return
+    }
     let disposed = false
     void (async () => {
       try {
         const result = await listHosts()
         if (disposed) return
         setHosts(result)
-        const remembered = readRememberedHost(sessionId)
-        if (remembered !== '' && result.some(host => host.alias === remembered)) setAlias(remembered)
-        else if (result.length === 1) setAlias(result[0]?.alias ?? '')
+        if (!result.some(host => host.alias === boundAlias)) {
+          setAlias('')
+          setTopError(`当前远程工作区绑定到 ${boundAlias}，但 SSH 主机配置中找不到这个别名。请在左侧 SSH 中补回该主机。`)
+          return
+        }
+        setTopError(null)
+        setAlias(boundAlias)
       } catch (error) {
         if (!disposed) setTopError(error instanceof Error ? error.message : String(error))
       }
     })()
     return () => { disposed = true }
-  }, [sessionId])
-
-  const refreshGitStatus = async (item?: SelectedItem | null, directoryOverride?: string): Promise<void> => {
-    if (alias === '') return
-    const path = directoryOverride ?? item?.path ?? selected?.path ?? '/'
-    const isDirectory = directoryOverride !== undefined || item?.entry.type === 'dir' || (item === undefined && selected?.entry.type === 'dir')
-    setGitBusy(true)
-    try {
-      const snapshot: GitStatusSnapshot | null = await readGitStatus(alias, path, isDirectory)
-      if (snapshot === null) {
-        setGitRoot(null)
-        setGitMarks({})
-        return
-      }
-      const marks: GitMarks = {}
-      for (const entry of snapshot.entries) marks[entry.path] = entry.status
-      setGitRoot(snapshot.root)
-      setGitMarks(marks)
-    } catch (error) {
-      setTopError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setGitBusy(false)
-    }
-  }
+  }, [boundAlias])
 
   const loadRoot = async (nextAlias = alias): Promise<void> => {
     if (nextAlias === '') return
@@ -493,8 +519,6 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
       setLoaded(nextLoaded)
       setErrors(nextErrors)
       setLoading({})
-      setGitRoot(null)
-      setGitMarks({})
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -503,12 +527,7 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
   }
 
   useEffect(() => {
-    if (alias === '') {
-      setRootEntries([])
-      return
-    }
-    writeRememberedHost(sessionId, alias)
-    void loadRoot(alias)
+    if (alias !== '') void loadRoot(alias)
   }, [alias, sessionId])
 
   const refreshDirectory = async (path: string): Promise<void> => {
@@ -538,33 +557,25 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     }
   }
 
-  const selectItem = (item: SelectedItem): void => {
-    setSelected(item)
-    void refreshGitStatus(item)
-  }
-
   const openFile = async (item: SelectedItem): Promise<void> => {
     if (alias === '' || item.entry.type !== 'file') return
-    if (previewPath === item.path && previewKind !== 'none') {
-      setSelected(item)
-      return
-    }
+    if (previewPath === item.path && previewKind !== 'none') return
     if (!confirmDiscard()) return
 
-    setSelected(item)
-    void refreshGitStatus(item)
     revokePreviewUrl()
     setPreviewPath(item.path)
     setPreviewKind('loading')
     setPreviewError('')
     setOriginalText('')
     setDraftText('')
+    setArchiveText('')
     setHtmlRendered(false)
 
     const ext = extensionOf(item.path)
     const knownText = TEXT_EXTENSIONS.has(ext)
     const knownImage = IMAGE_EXTENSIONS.has(ext)
     const knownPdf = ext === 'pdf'
+    const knownArchive = isArchive(item.path)
 
     if (knownText && item.entry.size > TEXT_PREVIEW_LIMIT) {
       setPreviewKind('too-large')
@@ -576,14 +587,20 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     }
 
     try {
+      if (knownArchive) {
+        setArchiveText(await readArchiveListing(alias, item.path))
+        setPreviewKind('archive')
+        return
+      }
+
       const blob = await readRemoteFile(alias, item.path)
       if (knownImage) {
-        setBlobPreview(blob)
+        setBlobPreview(blob, imageMime(item.path))
         setPreviewKind('image')
         return
       }
       if (knownPdf) {
-        setBlobPreview(blob)
+        setBlobPreview(blob, 'application/pdf')
         setPreviewKind('pdf')
         return
       }
@@ -602,6 +619,40 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     }
   }
 
+  const handleNodeClick = (event: ReactMouseEvent<HTMLButtonElement>, item: SelectedItem): void => {
+    const ctrl = event.ctrlKey || event.metaKey
+    const shift = event.shiftKey
+
+    if (shift && anchorPathRef.current !== null) {
+      const start = visibleItems.findIndex(candidate => candidate.path === anchorPathRef.current)
+      const end = visibleItems.findIndex(candidate => candidate.path === item.path)
+      if (start >= 0 && end >= 0) {
+        const [from, to] = start <= end ? [start, end] : [end, start]
+        const next: SelectionMap = ctrl ? { ...selection } : {}
+        for (const candidate of visibleItems.slice(from, to + 1)) next[candidate.path] = candidate
+        setSelection(next)
+        setPrimaryPath(item.path)
+        return
+      }
+    }
+
+    if (ctrl) {
+      const next = { ...selection }
+      if (next[item.path]) delete next[item.path]
+      else next[item.path] = item
+      setSelection(next)
+      setPrimaryPath(next[item.path] ? item.path : Object.keys(next).at(-1) ?? null)
+      anchorPathRef.current = item.path
+      return
+    }
+
+    setSelection({ [item.path]: item })
+    setPrimaryPath(item.path)
+    anchorPathRef.current = item.path
+    if (item.entry.type === 'dir') void toggle(item.path)
+    else if (item.entry.type === 'file') void openFile(item)
+  }
+
   const savePreview = async (): Promise<void> => {
     if (alias === '' || previewKind !== 'text' || previewPath === '' || !dirty) return
     setSaving(true)
@@ -609,7 +660,6 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
       await writeRemoteFile(alias, previewPath, draftText)
       setOriginalText(draftText)
       await refreshDirectory(parentOf(previewPath))
-      await refreshGitStatus(selected)
       showNotice('已保存')
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
@@ -618,18 +668,25 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     }
   }
 
-  const downloadItem = async (item: SelectedItem | null = selected): Promise<void> => {
-    if (alias === '' || item?.entry.type !== 'file') return
+  const downloadOne = async (item: SelectedItem): Promise<void> => {
+    if (alias === '' || item.entry.type !== 'file') return
+    const blob = await readRemoteFile(alias, item.path)
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = item.entry.name
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+  }
+
+  const downloadSelection = async (items = selectedItems): Promise<void> => {
+    const files = items.filter(item => item.entry.type === 'file')
+    if (files.length === 0) return
     try {
-      const blob = await readRemoteFile(alias, item.path)
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = item.entry.name
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
+      for (const item of files) await downloadOne(item)
+      if (files.length > 1) showNotice(`已触发 ${files.length} 个文件下载`)
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
     }
@@ -637,7 +694,7 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
 
   const createDirectory = async (parentOverride?: string): Promise<void> => {
     if (alias === '') return
-    const parent = parentOverride ?? (selected?.entry.type === 'dir' ? selected.path : selected?.parentPath ?? '/')
+    const parent = parentOverride ?? (primary?.entry.type === 'dir' ? primary.path : primary?.parentPath ?? '/')
     const answer = window.prompt(`在 ${parent} 下新建目录：`, 'new-folder')
     if (answer === null) return
     const name = answer.trim()
@@ -654,7 +711,6 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
         writeRememberedExpanded(sessionId, alias, nextExpanded)
       }
       await refreshDirectory(parent)
-      await refreshGitStatus(null, parent)
       showNotice('目录已创建')
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
@@ -663,25 +719,43 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     }
   }
 
-  const renameItem = async (item: SelectedItem | null = selected): Promise<void> => {
-    if (alias === '' || item === null) return
-    const answer = window.prompt('重命名为：', item.entry.name)
-    if (answer === null) return
-    const name = answer.trim()
-    if (!validName(name)) {
-      window.alert('名称不能为空，且不能包含 /。')
-      return
-    }
-    if (name === item.entry.name) return
+  const beginRename = (item: SelectedItem | null = primary): void => {
+    if (item === null || selectedItems.length > 1) return
+    setSelection({ [item.path]: item })
+    setPrimaryPath(item.path)
+    setRenameDraft(item.entry.name)
+    setRenamingPath(item.path)
+  }
 
-    const from = item.path
-    const to = joinPath(item.parentPath, name)
-    setMutating(true)
+  const cancelRename = (): void => {
+    renameCommitRef.current = true
+    setRenamingPath(null)
+    setRenameDraft('')
+    queueMicrotask(() => { renameCommitRef.current = false })
+  }
+
+  const commitRename = async (item: SelectedItem): Promise<void> => {
+    if (renamingPath !== item.path || renameCommitRef.current) return
+    renameCommitRef.current = true
+    const name = renameDraft.trim()
+    setRenamingPath(null)
+    setRenameDraft('')
     try {
+      if (!validName(name)) {
+        window.alert('名称不能为空，且不能包含 /。')
+        return
+      }
+      if (name === item.entry.name) return
+      if (alias === '') return
+
+      const from = item.path
+      const to = joinPath(item.parentPath, name)
+      setMutating(true)
       await renameRemotePath(alias, from, to)
 
+      let nextExpanded = expanded
       if (item.entry.type === 'dir') {
-        const nextExpanded = remapRecord(expanded, from, to)
+        nextExpanded = remapRecord(expanded, from, to)
         setExpanded(nextExpanded)
         setLoaded(prev => remapRecord(prev, from, to))
         setErrors(prev => remapRecord(prev, from, to))
@@ -689,42 +763,41 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
         writeRememberedExpanded(sessionId, alias, nextExpanded)
       }
 
-      const nextItem: SelectedItem = {
-        path: to,
-        parentPath: item.parentPath,
-        entry: { ...item.entry, name },
-      }
-      setSelected(nextItem)
+      const nextItem: SelectedItem = { path: to, parentPath: item.parentPath, entry: { ...item.entry, name } }
+      setSelection({ [to]: nextItem })
+      setPrimaryPath(to)
+      anchorPathRef.current = to
       if (previewPath !== '' && pathWithin(previewPath, from)) setPreviewPath(remapPath(previewPath, from, to))
       await refreshDirectory(item.parentPath)
-      await refreshGitStatus(nextItem)
       showNotice('已重命名')
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
     } finally {
       setMutating(false)
+      queueMicrotask(() => { renameCommitRef.current = false })
     }
   }
 
-  const deleteItem = async (item: SelectedItem | null = selected): Promise<void> => {
-    if (alias === '' || item === null) return
-    const suffix = dirty && pathWithin(previewPath, item.path) ? '\n该文件还有未保存修改。' : ''
-    if (!window.confirm(`永久删除 ${item.path}？${suffix}`)) return
+  const deleteSelection = async (items = selectedItems): Promise<void> => {
+    if (alias === '' || items.length === 0) return
+    const targets = collapseDeleteTargets(items)
+    const label = targets.length === 1 ? targets[0]!.path : `${targets.length} 个项目`
+    const affectsDirty = dirty && targets.some(item => pathWithin(previewPath, item.path))
+    if (!window.confirm(`永久删除 ${label}？${affectsDirty ? '\n其中包含尚未保存的编辑内容。' : ''}`)) return
+
     setMutating(true)
     try {
-      await deleteRemotePath(alias, item.path, item.entry.type === 'dir')
-      const nextExpanded = dropSubtree(expanded, item.path)
+      for (const item of targets) await deleteRemotePath(alias, item.path, item.entry.type === 'dir')
+      let nextExpanded = expanded
+      for (const item of targets) nextExpanded = dropSubtree(nextExpanded, item.path)
       setExpanded(nextExpanded)
-      setLoaded(prev => dropSubtree(prev, item.path))
-      setErrors(prev => dropSubtree(prev, item.path))
-      setLoading(prev => dropSubtree(prev, item.path))
       writeRememberedExpanded(sessionId, alias, nextExpanded)
-      if (previewPath !== '' && pathWithin(previewPath, item.path)) clearPreview()
-      const parent = item.parentPath
-      setSelected(null)
-      await refreshDirectory(parent)
-      await refreshGitStatus(null, parent)
-      showNotice('已删除')
+      if (targets.some(item => previewPath !== '' && pathWithin(previewPath, item.path))) clearPreview()
+      setSelection({})
+      setPrimaryPath(null)
+      anchorPathRef.current = null
+      await loadRoot(alias)
+      showNotice(targets.length === 1 ? '已删除' : `已删除 ${targets.length} 个项目`)
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
     } finally {
@@ -758,23 +831,12 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
         uploaded += 1
       }
       await refreshDirectory(directory)
-      await refreshGitStatus(null, directory)
       showNotice(uploaded > 0 ? `已上传 ${uploaded} 个文件` : '没有上传文件')
     } catch (error) {
       setTopError(error instanceof Error ? error.message : String(error))
     } finally {
       setMutating(false)
     }
-  }
-
-  const handleAliasChange = (nextAlias: string): void => {
-    if (nextAlias === alias) return
-    if (!confirmDiscard()) return
-    clearPreview()
-    setSelected(null)
-    setGitRoot(null)
-    setGitMarks({})
-    setAlias(nextAlias)
   }
 
   const closePreview = (): void => {
@@ -785,11 +847,14 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
   const openContextMenu = (event: ReactMouseEvent<HTMLButtonElement>, item: SelectedItem): void => {
     event.preventDefault()
     event.stopPropagation()
-    setSelected(item)
-    void refreshGitStatus(item)
+    if (!selection[item.path]) {
+      setSelection({ [item.path]: item })
+      anchorPathRef.current = item.path
+    }
+    setPrimaryPath(item.path)
     setContextMenu({
-      x: Math.min(event.clientX, window.innerWidth - 190),
-      y: Math.min(event.clientY, window.innerHeight - 250),
+      x: Math.min(event.clientX, window.innerWidth - 210),
+      y: Math.min(event.clientY, window.innerHeight - 280),
       item,
       directory: item.entry.type === 'dir' ? item.path : item.parentPath,
     })
@@ -799,8 +864,8 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     if (event.target !== event.currentTarget) return
     event.preventDefault()
     setContextMenu({
-      x: Math.min(event.clientX, window.innerWidth - 190),
-      y: Math.min(event.clientY, window.innerHeight - 210),
+      x: Math.min(event.clientX, window.innerWidth - 210),
+      y: Math.min(event.clientY, window.innerHeight - 220),
       item: null,
       directory: '/',
     })
@@ -831,43 +896,62 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
     void action()
   }
 
+  const handleTreeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+      event.preventDefault()
+      const next: SelectionMap = {}
+      for (const item of visibleItems) next[item.path] = item
+      setSelection(next)
+      if (visibleItems.length) setPrimaryPath(visibleItems.at(-1)!.path)
+      return
+    }
+    if (event.key === 'F2' && selectedItems.length === 1) {
+      event.preventDefault()
+      beginRename(selectedItems[0]!)
+      return
+    }
+    if (event.key === 'Delete' && selectedItems.length > 0) {
+      event.preventDefault()
+      void deleteSelection()
+    }
+  }
+
+  if (boundAlias === null) {
+    return (
+      <div style={{ height: '100%', display: 'grid', placeItems: 'center', padding: 18, textAlign: 'center', opacity: .68, fontSize: 12 }}>
+        SSH Files 只在远程 SSH 工作区中可用。请通过“添加工作区 → 远程 SSH”进入服务器目录。
+      </div>
+    )
+  }
+
+  const menuSelection = contextMenu?.item && selection[contextMenu.item.path]
+    ? selectedItems
+    : contextMenu?.item ? [contextMenu.item] : []
+  const menuFileCount = menuSelection.filter(item => item.entry.type === 'file').length
+
   return (
     <div style={{ height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column', color: 'inherit', position: 'relative' }}>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        hidden
-        onChange={event => { void uploadFiles(event.currentTarget.files) }}
-      />
+      <input ref={fileInputRef} type="file" multiple hidden onChange={event => { void uploadFiles(event.currentTarget.files) }} />
 
-      <div style={{ display: 'flex', gap: 8, padding: 8, borderBottom: '1px solid rgba(128,128,128,.22)' }}>
-        <select
-          value={alias}
-          onChange={event => handleAliasChange(event.target.value)}
-          style={{ flex: 1, minWidth: 0, background: 'transparent', color: 'inherit', border: '1px solid rgba(128,128,128,.35)', borderRadius: 6, padding: '5px 7px' }}
-          aria-label="SSH 主机"
-        >
-          <option value="">选择 SSH 主机</option>
-          {hosts.map(host => <option key={host.alias} value={host.alias}>{host.alias} ({host.user}@{host.host})</option>)}
-        </select>
+      <div style={{ display: 'flex', gap: 8, padding: 8, borderBottom: '1px solid rgba(128,128,128,.22)', alignItems: 'center' }}>
+        <div style={{ flex: 1, minWidth: 0, border: '1px solid rgba(128,128,128,.35)', borderRadius: 6, padding: '5px 8px', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {selectedHost ? `${selectedHost.alias} (${selectedHost.user}@${selectedHost.host})` : boundAlias}
+        </div>
         <button type="button" onClick={() => { void loadRoot() }} disabled={alias === '' || busy} title="刷新全部" style={smallButtonStyle}>↻</button>
       </div>
 
       {selectedHost && (
         <div style={{ padding: '6px 10px', fontSize: 11, opacity: 0.65, borderBottom: '1px solid rgba(128,128,128,.14)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selectedHost.user}@{selectedHost.host}:{selectedHost.port} · /
-          {gitRoot !== null && <span title={gitRoot}> · Git: {gitRoot}</span>}
         </div>
       )}
 
       <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderBottom: '1px solid rgba(128,128,128,.14)', flexWrap: 'wrap' }}>
         <button type="button" onClick={() => { void createDirectory() }} disabled={alias === '' || mutating} style={smallButtonStyle}>＋目录</button>
-        <button type="button" onClick={() => chooseUpload(selected?.entry.type === 'dir' ? selected.path : selected?.parentPath ?? '/')} disabled={alias === '' || mutating} style={smallButtonStyle}>上传</button>
-        <button type="button" onClick={() => { void renameItem() }} disabled={selected === null || mutating} style={smallButtonStyle}>重命名</button>
-        <button type="button" onClick={() => { void deleteItem() }} disabled={selected === null || mutating} style={smallButtonStyle}>删除</button>
-        <button type="button" onClick={() => { void downloadItem() }} disabled={selected?.entry.type !== 'file'} style={smallButtonStyle}>下载</button>
-        <button type="button" onClick={() => { void refreshGitStatus() }} disabled={alias === '' || gitBusy} style={smallButtonStyle}>{gitBusy ? 'Git…' : 'Git'}</button>
+        <button type="button" onClick={() => chooseUpload(primary?.entry.type === 'dir' ? primary.path : primary?.parentPath ?? '/')} disabled={alias === '' || mutating} style={smallButtonStyle}>上传</button>
+        <button type="button" onClick={() => beginRename()} disabled={selectedItems.length !== 1 || mutating} style={smallButtonStyle}>重命名</button>
+        <button type="button" onClick={() => { void deleteSelection() }} disabled={selectedItems.length === 0 || mutating} style={smallButtonStyle}>删除{selectedItems.length > 1 ? `(${selectedItems.length})` : ''}</button>
+        <button type="button" onClick={() => { void downloadSelection() }} disabled={!selectedItems.some(item => item.entry.type === 'file')} style={smallButtonStyle}>下载{selectedItems.filter(item => item.entry.type === 'file').length > 1 ? `(${selectedItems.filter(item => item.entry.type === 'file').length})` : ''}</button>
       </div>
 
       {topError && <div style={{ margin: 8, padding: 8, borderRadius: 6, background: 'rgba(220,53,69,.10)', color: '#d9534f', fontSize: 12 }}>{topError}</div>}
@@ -875,6 +959,8 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
 
       <div ref={splitContainerRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div
+          tabIndex={0}
+          onKeyDown={handleTreeKeyDown}
           onContextMenu={openRootContextMenu}
           style={{
             height: previewKind === 'none' ? '100%' : `${treePercent}%`,
@@ -882,9 +968,10 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
             minHeight: 100,
             overflow: 'auto',
             padding: '4px 0 12px',
+            outline: 'none',
           }}
         >
-          {alias === '' && <div style={{ padding: 12, opacity: 0.62, fontSize: 12 }}>请先在 @linxin666/dsh-ssh 中配置主机，然后在这里选择。</div>}
+          {alias === '' && !topError && <div style={{ padding: 12, opacity: 0.62, fontSize: 12 }}>正在读取当前远程工作区的 SSH 主机配置…</div>}
           {alias !== '' && busy && rootEntries.length === 0 && <div style={{ padding: 12, opacity: 0.62, fontSize: 12 }}>正在读取 / …</div>}
           {rootEntries.map(entry => (
             <TreeNode
@@ -897,30 +984,20 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
               loaded={loaded}
               loading={loading}
               errors={errors}
-              gitMarks={gitMarks}
-              selectedPath={selected?.path}
-              onToggle={path => { void toggle(path) }}
-              onSelect={selectItem}
-              onOpenFile={item => { void openFile(item) }}
+              selectedPaths={selectedPaths}
+              renamingPath={renamingPath}
+              renameDraft={renameDraft}
+              onClick={handleNodeClick}
               onContextMenu={openContextMenu}
+              onRenameDraft={setRenameDraft}
+              onRenameCommit={item => { void commitRename(item) }}
+              onRenameCancel={cancelRename}
             />
           ))}
         </div>
 
         {previewKind !== 'none' && (
-          <div
-            onPointerDown={startResize}
-            title="拖拽调整文件树 / 编辑器高度"
-            style={{
-              height: 7,
-              flex: '0 0 7px',
-              cursor: 'row-resize',
-              touchAction: 'none',
-              borderTop: '1px solid rgba(128,128,128,.20)',
-              borderBottom: '1px solid rgba(128,128,128,.20)',
-              background: 'rgba(128,128,128,.07)',
-            }}
-          />
+          <div onPointerDown={startResize} title="拖拽调整文件树 / 编辑器高度" style={{ height: 7, flex: '0 0 7px', cursor: 'row-resize', touchAction: 'none', borderTop: '1px solid rgba(128,128,128,.20)', borderBottom: '1px solid rgba(128,128,128,.20)', background: 'rgba(128,128,128,.07)' }} />
         )}
 
         {previewKind !== 'none' && (
@@ -928,114 +1005,54 @@ export function RemoteFilesTab({ sessionId = 'global' }: RemoteFilesTabProps) {
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '6px 8px', borderBottom: '1px solid rgba(128,128,128,.18)' }}>
               <strong title={previewPath} style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>{basename(previewPath)}</strong>
               {dirty && <span style={{ fontSize: 10, color: '#d98c00' }}>未保存</span>}
-              {previewKind === 'text' && !htmlRendered && (
-                <button type="button" onClick={() => editorRef.current?.openSearch()} style={smallButtonStyle}>搜索</button>
-              )}
-              {previewKind === 'text' && isHtml(previewPath) && (
-                <button type="button" onClick={() => setHtmlRendered(value => !value)} style={smallButtonStyle}>{htmlRendered ? '源码' : '预览'}</button>
-              )}
-              {previewKind === 'text' && (
-                <button type="button" onClick={() => { void savePreview() }} disabled={!dirty || saving} style={smallButtonStyle}>{saving ? '保存中…' : '保存'}</button>
-              )}
+              {previewKind === 'text' && !htmlRendered && <button type="button" onClick={() => editorRef.current?.openSearch()} style={smallButtonStyle}>搜索</button>}
+              {previewKind === 'text' && isHtml(previewPath) && <button type="button" onClick={() => setHtmlRendered(value => !value)} style={smallButtonStyle}>{htmlRendered ? '源码' : '预览'}</button>}
+              {previewKind === 'text' && <button type="button" onClick={() => { void savePreview() }} disabled={!dirty || saving} style={smallButtonStyle}>{saving ? '保存中…' : '保存'}</button>}
               <button type="button" onClick={closePreview} style={smallButtonStyle}>×</button>
             </div>
 
-            <div style={{ padding: '4px 8px', fontSize: 10, opacity: 0.58, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={previewPath}>
-              {previewPath}
-            </div>
+            <div style={{ padding: '4px 8px', fontSize: 10, opacity: 0.58, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={previewPath}>{previewPath}</div>
 
             {previewKind === 'loading' && <div style={{ padding: 12, opacity: 0.65, fontSize: 12 }}>正在读取文件…</div>}
             {previewKind === 'error' && <div style={{ padding: 12, color: '#d9534f', fontSize: 12 }}>{previewError}</div>}
-            {previewKind === 'too-large' && (
-              <div style={{ padding: 12, fontSize: 12 }}>
-                文件较大，已停止自动预览以避免浏览器卡顿。可以使用“下载”保存到本地。
-              </div>
+            {previewKind === 'too-large' && <div style={{ padding: 12, fontSize: 12 }}>文件较大，已停止自动预览以避免浏览器卡顿。可以使用“下载”保存到本地。</div>}
+            {previewKind === 'binary' && <div style={{ padding: 12, fontSize: 12 }}>这是当前不支持直接预览的二进制文件。可以使用“下载”。</div>}
+            {previewKind === 'archive' && (
+              <pre style={{ flex: 1, minHeight: 0, overflow: 'auto', margin: 0, padding: 10, borderTop: '1px solid rgba(128,128,128,.12)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 11, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{archiveText}</pre>
             )}
-            {previewKind === 'binary' && (
-              <div style={{ padding: 12, fontSize: 12 }}>
-                这是二进制或当前不支持直接编辑的文件。可以使用“下载”。
-              </div>
-            )}
-            {previewKind === 'text' && htmlRendered && (
-              <iframe
-                title={`HTML preview ${previewPath}`}
-                srcDoc={draftText}
-                sandbox=""
-                style={{ flex: 1, minHeight: 120, width: '100%', border: 0, background: 'white' }}
-              />
-            )}
+            {previewKind === 'text' && htmlRendered && <iframe title={`HTML preview ${previewPath}`} srcDoc={draftText} sandbox="" style={{ flex: 1, minHeight: 120, width: '100%', border: 0, background: 'white' }} />}
             {previewKind === 'text' && !htmlRendered && (
               <div style={{ flex: 1, minHeight: 0, borderTop: '1px solid rgba(128,128,128,.12)' }}>
-                <CodeEditor
-                  ref={editorRef}
-                  path={previewPath}
-                  value={draftText}
-                  onChange={setDraftText}
-                  onSave={savePreview}
-                />
+                <CodeEditor ref={editorRef} path={previewPath} value={draftText} onChange={setDraftText} onSave={savePreview} />
               </div>
             )}
             {previewKind === 'image' && previewUrl !== '' && (
               <div style={{ flex: 1, minHeight: 120, overflow: 'auto', display: 'grid', placeItems: 'center', padding: 10 }}>
-                <img src={previewUrl} alt={basename(previewPath)} style={{ maxWidth: '100%', maxHeight: 520, objectFit: 'contain' }} />
+                <img src={previewUrl} alt={basename(previewPath)} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
               </div>
             )}
-            {previewKind === 'pdf' && previewUrl !== '' && (
-              <iframe title={`PDF preview ${previewPath}`} src={previewUrl} style={{ flex: 1, minHeight: 180, width: '100%', border: 0 }} />
-            )}
+            {previewKind === 'pdf' && previewUrl !== '' && <iframe title={`PDF preview ${previewPath}`} src={previewUrl} style={{ flex: 1, minHeight: 180, width: '100%', border: 0 }} />}
           </div>
         )}
       </div>
 
-      {selected && (
-        <div style={{ padding: '5px 9px', fontSize: 10, opacity: 0.5, borderTop: '1px solid rgba(128,128,128,.14)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${selected.path}\n${formatTime(selected.entry.mtimeMs)}`}>
-          {selected.path} · {selected.entry.type === 'dir' ? '目录' : formatBytes(selected.entry.size)}
-        </div>
-      )}
+      <div style={{ padding: '5px 9px', fontSize: 10, opacity: 0.52, borderTop: '1px solid rgba(128,128,128,.14)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {selectedItems.length > 1
+          ? `${selectedItems.length} 项已选择 · Ctrl 点击增减选择 · Shift 点击范围选择`
+          : primary ? `${primary.path} · ${primary.entry.type === 'dir' ? '目录' : formatBytes(primary.entry.size)}` : 'Ctrl/Shift 可多选；F2 重命名；Delete 删除'}
+      </div>
 
       {contextMenu !== null && (
         <>
-          <div
-            onMouseDown={() => setContextMenu(null)}
-            onContextMenu={event => { event.preventDefault(); setContextMenu(null) }}
-            style={{ position: 'fixed', inset: 0, zIndex: 9998 }}
-          />
-          <div
-            onMouseDown={event => event.stopPropagation()}
-            style={{
-              position: 'fixed',
-              left: contextMenu.x,
-              top: contextMenu.y,
-              zIndex: 9999,
-              width: 178,
-              padding: 5,
-              borderRadius: 8,
-              border: '1px solid rgba(128,128,128,.30)',
-              background: 'var(--color-background, Canvas)',
-              color: 'inherit',
-              boxShadow: '0 8px 28px rgba(0,0,0,.22)',
-            }}
-          >
-            {contextMenu.item?.entry.type === 'file' && (
-              <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => openFile(contextMenu.item!))}>打开 / 编辑</button>
-            )}
-            {contextMenu.item?.entry.type === 'file' && (
-              <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => downloadItem(contextMenu.item))}>下载</button>
-            )}
+          <div onMouseDown={() => setContextMenu(null)} onContextMenu={event => { event.preventDefault(); setContextMenu(null) }} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+          <div onMouseDown={event => event.stopPropagation()} style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 9999, width: 196, padding: 5, borderRadius: 8, border: '1px solid rgba(128,128,128,.30)', background: 'var(--color-background, Canvas)', color: 'inherit', boxShadow: '0 8px 28px rgba(0,0,0,.22)' }}>
+            {contextMenu.item?.entry.type === 'file' && menuSelection.length === 1 && <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => openFile(contextMenu.item!))}>打开 / 预览 / 编辑</button>}
+            {menuFileCount > 0 && <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => downloadSelection(menuSelection))}>下载{menuFileCount > 1 ? `选中文件 (${menuFileCount})` : ''}</button>}
             <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => refreshDirectory(contextMenu.directory))}>刷新目录</button>
-            {(contextMenu.item === null || contextMenu.item.entry.type === 'dir') && (
-              <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => chooseUpload(contextMenu.directory))}>上传文件到这里</button>
-            )}
-            {(contextMenu.item === null || contextMenu.item.entry.type === 'dir') && (
-              <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => createDirectory(contextMenu.directory))}>新建目录</button>
-            )}
-            <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => refreshGitStatus(contextMenu.item, contextMenu.directory))}>刷新 Git 状态</button>
-            {contextMenu.item !== null && (
-              <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => renameItem(contextMenu.item))}>重命名</button>
-            )}
-            {contextMenu.item !== null && (
-              <button type="button" style={{ ...menuButtonStyle, color: '#d9534f' }} onClick={() => runContextAction(() => deleteItem(contextMenu.item))}>删除</button>
-            )}
+            {(contextMenu.item === null || contextMenu.item.entry.type === 'dir') && <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => chooseUpload(contextMenu.directory))}>上传文件到这里</button>}
+            {(contextMenu.item === null || contextMenu.item.entry.type === 'dir') && <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => createDirectory(contextMenu.directory))}>新建目录</button>}
+            {menuSelection.length === 1 && contextMenu.item !== null && <button type="button" style={menuButtonStyle} onClick={() => runContextAction(() => beginRename(contextMenu.item))}>重命名（原地编辑）</button>}
+            {menuSelection.length > 0 && <button type="button" style={{ ...menuButtonStyle, color: '#d9534f' }} onClick={() => runContextAction(() => deleteSelection(menuSelection))}>删除{menuSelection.length > 1 ? `选中项目 (${menuSelection.length})` : ''}</button>}
           </div>
         </>
       )}
