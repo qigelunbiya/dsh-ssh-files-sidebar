@@ -8,8 +8,7 @@ import { TransferTab } from '@linxin666/dsh-ssh/src/client/panel/TransferTab.tsx
 import { TunnelsTab } from '@linxin666/dsh-ssh/src/client/panel/TunnelsTab.tsx'
 import css from '@linxin666/dsh-ssh/src/client/panel/panel.module.css'
 import { LinkedTerminalTab } from './LinkedTerminalTab.tsx'
-
-export const OPEN_LINKED_TERMINAL_EVENT = 'dsh-ssh-files-sidebar:open-linked-terminal'
+import { OPEN_LINKED_TERMINAL_EVENT } from './linked-ssh-events.ts'
 
 type SshTab = 'hosts' | 'terminal' | 'transfer' | 'tunnels' | 'cluster'
 
