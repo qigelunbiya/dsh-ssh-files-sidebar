@@ -11,13 +11,19 @@ const ACTIVATE_EVENT = 'dsh-panel-activate'
 const PANEL_NAME = 'ssh'
 
 function conversationColumn(): HTMLElement | undefined {
-  // Older / upstream shells expose data-pane="conversation". Some current
-  // Harness builds only leave the generated centerCol class on the actual
-  // center grid item. The SSH stylesheet already supports both shapes, so the
-  // mount code must use the same fallback instead of assuming data-pane exists.
-  return document.querySelector<HTMLElement>(PRIMARY_CONVERSATION_COLUMN_SELECTOR)
-    ?? document.querySelector<HTMLElement>(FALLBACK_CENTER_COLUMN_SELECTOR)
-    ?? undefined
+  const pane = document.querySelector<HTMLElement>(PRIMARY_CONVERSATION_COLUMN_SELECTOR)
+  if (pane !== null) {
+    // Current Harness can nest [data-pane="conversation"] inside centerCol.
+    // The dsh-ssh stylesheet hides every direct centerCol child except
+    // [data-dsh-ssh-view] while SSH is active. Mounting our view *inside* the
+    // nested pane therefore caused centerCol to hide the pane itself, leaving
+    // a completely white center area. Put the SSH view beside the pane as a
+    // direct center-column child whenever that outer container exists.
+    const outerCenter = pane.closest<HTMLElement>(FALLBACK_CENTER_COLUMN_SELECTOR)
+    if (outerCenter !== null) return outerCenter
+    return pane
+  }
+  return document.querySelector<HTMLElement>(FALLBACK_CENTER_COLUMN_SELECTOR) ?? undefined
 }
 
 /** Upstream mount behavior with our Linked-SSH-aware panel component. */
@@ -70,9 +76,6 @@ export function mountEmbeddedSshPanel(controller: PanelController, api: SshApi):
   function applyActive(): void {
     if (controller.getSnapshot().panelOpen) {
       // Never hide the conversation until the SSH view is actually mounted.
-      // Previously the controller could set the global active attribute while
-      // no [data-dsh-ssh-view] existed, producing the all-white center pane the
-      // user observed. Ensure/remount first, and retry after shell transitions.
       if (!ensure()) {
         document.documentElement.removeAttribute(ACTIVE_ATTR)
         scheduleEnsure()
