@@ -1,6 +1,7 @@
 import { apply as applySshClient } from './embedded-ssh-client.js'
 import { LinkedSshHeaderAction } from './LinkedSshHeaderAction.tsx'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
+import { SessionSshTerminalView } from './SessionSshTerminalView.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
 import { getLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
 
@@ -133,9 +134,10 @@ export const inject = [
 ]
 
 export function apply(ctx: any): void {
-  // Original dsh-ssh browser surfaces: left SSH entry + center host/terminal/
-  // transfer/tunnel/cluster panel. This shares the host half mounted by our
-  // package root and therefore the same ~/.dsh/dsh-ssh.json configuration.
+  // Original dsh-ssh browser surfaces remain available from the left SSH entry
+  // for host management, transfer, tunnels and ad-hoc administration. The
+  // session-bound terminal below is intentionally a different surface: it can
+  // never select a host independently from Linked SSH.
   applySshClient(ctx)
 
   // Replace the raw native directory picker entry with an explicit Local /
@@ -147,12 +149,24 @@ export function apply(ctx: any): void {
 
   // Linked SSH is session-scoped and additive: a local Workspace stays local,
   // while the session can independently point at one configured SSH host.
+  // This selector is the single source of truth for Agent context, SSH Files
+  // and the session SSH terminal.
   ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions',
     id: 'linked-ssh',
     order: 5,
     label: 'SSH',
   }, LinkedSshHeaderAction))
+
+  // Native conversation tab beside “对话 / 轨迹”. It is deliberately bound to
+  // the current session's Linked SSH alias and exposes no host selector of its
+  // own, preventing terminal/SSH-Files/Agent target drift.
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
+    id: 'ssh-terminal',
+    order: 20,
+    label: 'SSH终端',
+  }, SessionSshTerminalView))
 
   ctx.effect(() => ctx.betterSidebar.registerTab({
     id: 'dsh-ssh-files-sidebar:files',
