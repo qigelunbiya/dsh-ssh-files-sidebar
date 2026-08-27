@@ -124,8 +124,9 @@ function installSshFilesContextMenuPositionFix(): () => void {
  *
  * xterm's custom key handler decides whether a key is forwarded to the PTY,
  * but returning false does not reliably cancel Chrome's page-level defaults.
- * This capture listener prevents browser zoom/find/reset while still allowing
- * the xterm handler to run afterwards.
+ * Listen at window capture (the earliest DOM phase available to page code) and
+ * cancel browser defaults before the event reaches xterm. Propagation remains
+ * intact so SessionSshTerminalView can still perform its own search/font action.
  *
  * Clipboard paste is the opposite case: Ctrl+V must stay a native browser paste
  * event. When clipboard-read permission is granted, the terminal's explicit
@@ -134,14 +135,21 @@ function installSshFilesContextMenuPositionFix(): () => void {
  * preventDefault) so the browser performs exactly one native paste event.
  */
 function installSessionTerminalBrowserShortcutCompatibility(): () => void {
-  const isSessionTerminalTarget = (target: EventTarget | null): boolean => {
-    if (!(target instanceof HTMLElement)) return false
-    const xterm = target.closest('.xterm')
+  const findXterm = (target: EventTarget | null): Element | null => {
+    return target instanceof Element ? target.closest('.xterm') : null
+  }
+
+  const isSessionTerminalTarget = (eventTarget: EventTarget | null): boolean => {
+    // Some Chromium/xterm combinations report the helper textarea as the event
+    // target, while others can surface document/body during IME/focus changes.
+    // Fall back to activeElement so the guard still recognizes the focused PTY.
+    const xterm = findXterm(eventTarget) ?? findXterm(document.activeElement)
     if (xterm === null) return false
+
     // The original full SSH management panel is mounted under this marker.
     // Leave its keyboard behavior untouched; this compatibility layer is only
     // for the conversation-level Linked SSH terminal.
-    return target.closest('[data-dsh-ssh-view]') === null
+    return xterm.closest('[data-dsh-ssh-view]') === null
   }
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -159,8 +167,9 @@ function installSessionTerminalBrowserShortcutCompatibility(): () => void {
 
     if (!mod) return
 
+    const isTerminalFind = key === 'f' || event.code === 'KeyF'
     const terminalOwnedBrowserShortcut =
-      key === 'f' ||
+      isTerminalFind ||
       key === '0' ||
       key === '-' ||
       key === '=' ||
@@ -168,15 +177,16 @@ function installSessionTerminalBrowserShortcutCompatibility(): () => void {
       (event.shiftKey && (key === 'c' || key === 'a'))
 
     if (terminalOwnedBrowserShortcut) {
-      // Prevent Chrome page zoom / reset, browser find, DevTools element picker,
-      // etc., while keeping propagation so SessionSshTerminalView's xterm key
-      // handler can perform the corresponding terminal action.
+      // Explicitly cancel Chromium's built-in Find/Zoom actions. Using window
+      // capture plus returnValue=false is intentionally redundant here: it
+      // covers Chrome variants where document-level prevention arrived too late.
       event.preventDefault()
+      event.returnValue = false
     }
   }
 
-  document.addEventListener('keydown', onKeyDown, true)
-  return () => { document.removeEventListener('keydown', onKeyDown, true) }
+  window.addEventListener('keydown', onKeyDown, true)
+  return () => { window.removeEventListener('keydown', onKeyDown, true) }
 }
 
 // We compose the original dsh-ssh browser UI inside this one client plugin.
