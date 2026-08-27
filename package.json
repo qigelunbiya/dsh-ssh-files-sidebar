@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Integrated DSH Remote SSH workspace, Linked SSH, SSH operations UI and VSCode-like remote file explorer/editor.",
   "type": "module",
   "license": "MIT",
@@ -59,6 +59,8 @@
   "dependencies": {
     "@linxin666/dsh-ssh": "0.3.4",
     "dsh-rw": "https://github.com/MDR-EX1000/dsh-rw/releases/latest/download/dsh-rw.tgz",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "@codemirror/commands": "^6.10.4",
     "@codemirror/lang-cpp": "^6.0.3",
     "@codemirror/lang-css": "^6.3.1",
