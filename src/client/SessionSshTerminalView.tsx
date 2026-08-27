@@ -3,11 +3,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Terminal, type IDisposable } from '@xterm/xterm'
 import { listHosts, type SshHostSummary } from './api.ts'
-import {
-  SshApi,
-  XTERM_CSS,
-  type TerminalConnectionBridge,
-} from './ssh-panel-bridge.js'
+import { SshApi, XTERM_CSS, type TerminalConnectionBridge } from './ssh-panel-bridge.js'
 import { useLinkedSshAlias } from './linked-ssh-store.ts'
 
 interface SessionSshTerminalViewProps {
@@ -21,15 +17,8 @@ type TerminalStatus =
   | { kind: 'exited'; alias: string; detail?: string }
   | { kind: 'error'; alias?: string; detail: string }
 
-interface ContextMenuState {
-  x: number
-  y: number
-}
-
-interface SearchResultState {
-  index: number
-  count: number
-}
+interface ContextMenuState { x: number; y: number }
+interface SearchResultState { index: number; count: number }
 
 const DEFAULT_FONT_SIZE = 13
 const MIN_FONT_SIZE = 9
@@ -99,12 +88,9 @@ function legacyCopy(text: string): boolean {
 }
 
 /**
- * Session-scoped SSH terminal for the conversation view ring.
- *
- * The target is intentionally NOT selectable here. It always follows the
- * session's Linked SSH binding, which is changed only by the header control.
- * This keeps Agent context, SSH Files and the terminal on one authoritative
- * remote host instead of allowing each surface to drift to a different host.
+ * Session-scoped SSH terminal. The host is intentionally not selectable here:
+ * the session header Linked SSH binding is the single source of truth shared by
+ * Agent context, SSH Files and this terminal.
  */
 export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProps) {
   const linkedAlias = useLinkedSshAlias(sessionId)
@@ -130,7 +116,6 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
   const connectionRef = useRef<TerminalConnectionBridge | null>(null)
   const inputSubscriptionRef = useRef<IDisposable | null>(null)
   const selectionSubscriptionRef = useRef<IDisposable | null>(null)
-  const keySubscriptionRef = useRef<IDisposable | null>(null)
   const searchResultSubscriptionRef = useRef<IDisposable | null>(null)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const generationRef = useRef(0)
@@ -168,8 +153,6 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
     inputSubscriptionRef.current = null
     selectionSubscriptionRef.current?.dispose()
     selectionSubscriptionRef.current = null
-    keySubscriptionRef.current?.dispose()
-    keySubscriptionRef.current = null
     searchResultSubscriptionRef.current?.dispose()
     searchResultSubscriptionRef.current = null
     resizeObserverRef.current?.disconnect()
@@ -180,8 +163,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
     searchAddonRef.current = null
     setHasSelection(false)
     setSearchResult({ index: -1, count: 0 })
-    const container = containerRef.current
-    if (container !== null) container.replaceChildren()
+    containerRef.current?.replaceChildren()
   }
 
   const fitTerminal = (): void => {
@@ -192,8 +174,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
       fit.fit()
       connectionRef.current?.resize(term.cols, term.rows)
     } catch {
-      // The view may be transitioning in/out of the active tab. A later
-      // ResizeObserver/requestAnimationFrame pass will fit it once visible.
+      // The view may still be transitioning. ResizeObserver will try again.
     }
   }
 
@@ -202,9 +183,8 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
     fontSizeRef.current = size
     setFontSizeState(size)
     writeFontSize(size)
-    const term = termRef.current
-    if (term !== null) term.options.fontSize = size
-    window.requestAnimationFrame(() => { fitTerminal() })
+    if (termRef.current !== null) termRef.current.options.fontSize = size
+    window.requestAnimationFrame(fitTerminal)
   }
 
   const copySelection = async (): Promise<void> => {
@@ -228,8 +208,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
   const pasteText = (text: string): void => {
     const term = termRef.current
     if (term === null || text === '') return
-    // Let xterm perform bracketed-paste handling and feed the result through
-    // the existing onData subscription instead of writing to the PTY directly.
+    // xterm handles bracketed-paste mode before forwarding through onData.
     term.paste(text)
     term.focus()
   }
@@ -336,13 +315,15 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
         setSearchResult({ index: result.resultIndex, count: result.resultCount })
       })
 
-      keySubscriptionRef.current = term.attachCustomKeyEventHandler(event => {
+      // xterm 6 registers the key handler for the lifetime of Terminal and
+      // returns void; disposing Terminal in teardown removes it as well.
+      term.attachCustomKeyEventHandler(event => {
         if (event.type !== 'keydown') return true
         const mod = event.ctrlKey || event.metaKey
         const key = event.key.toLowerCase()
 
-        // Familiar terminal clipboard behavior: Ctrl+C copies only when text
-        // is selected; otherwise it remains SIGINT for the remote shell.
+        // Ctrl+C stays SIGINT when there is no selection. With a selection it
+        // behaves like a modern integrated terminal and copies instead.
         if (mod && key === 'c' && (event.shiftKey || term.hasSelection())) {
           void copySelection()
           return false
@@ -351,7 +332,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
           void pasteFromClipboard()
           return false
         }
-        if ((mod && event.key === 'Insert')) {
+        if (mod && event.key === 'Insert') {
           void copySelection()
           return false
         }
@@ -384,8 +365,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
           closeSearch()
           return false
         }
-        // Ctrl+L intentionally passes through to the remote shell, preserving
-        // the conventional readline clear-screen behavior.
+        // Ctrl+L passes through to readline/shell, preserving native clear.
         return true
       })
 
@@ -420,7 +400,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
       })
 
       if (typeof ResizeObserver !== 'undefined') {
-        const observer = new ResizeObserver(() => { fitTerminal() })
+        const observer = new ResizeObserver(fitTerminal)
         observer.observe(container)
         resizeObserverRef.current = observer
       }
@@ -443,12 +423,8 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
     setHost(null)
     if (linkedAlias === null) return () => { disposed = true }
     void listHosts().then(
-      hosts => {
-        if (!disposed) setHost(hosts.find(item => item.alias === linkedAlias) ?? null)
-      },
-      () => {
-        if (!disposed) setHost(null)
-      },
+      hosts => { if (!disposed) setHost(hosts.find(item => item.alias === linkedAlias) ?? null) },
+      () => { if (!disposed) setHost(null) },
     )
     return () => { disposed = true }
   }, [linkedAlias])
@@ -456,9 +432,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
   useEffect(() => {
     if (contextMenu === null) return
     const close = (): void => { setContextMenu(null) }
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') close()
-    }
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') close() }
     window.addEventListener('pointerdown', close)
     window.addEventListener('blur', close)
     window.addEventListener('resize', close)
@@ -471,9 +445,8 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
     }
   }, [contextMenu])
 
-  // The Linked SSH selector in the session header is the single source of
-  // truth. When it changes while this view is open, disconnect the old shell
-  // and connect the newly selected server automatically.
+  // Changing the header Linked SSH target tears down the old PTY and follows
+  // the new target automatically, keeping Terminal and SSH Files synchronized.
   useEffect(() => {
     teardown()
     if (linkedAlias === null) {
@@ -502,125 +475,52 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
       : `${linkedAlias} (${host.user}@${host.host}:${host.port})`
 
   const menuButton = (disabled = false) => ({
-    width: '100%',
-    border: 0,
-    borderRadius: 5,
-    background: 'transparent',
+    width: '100%', border: 0, borderRadius: 5, background: 'transparent',
     color: disabled ? 'rgba(128,128,128,.55)' : 'inherit',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 18,
-    padding: '7px 9px',
-    cursor: disabled ? 'default' : 'pointer',
-    fontSize: 12,
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 18,
+    padding: '7px 9px', cursor: disabled ? 'default' : 'pointer', fontSize: 12,
     textAlign: 'left' as const,
   })
 
   return (
     <div style={{
-      boxSizing: 'border-box',
-      width: '100%',
-      minHeight: '62vh',
-      height: '100%',
-      padding: '12px 14px 14px',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-      overflow: 'hidden',
+      boxSizing: 'border-box', width: '100%', minHeight: '62vh', height: '100%',
+      padding: '12px 14px 14px', display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden',
     }}>
-      <div style={{
-        flex: 'none',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        minWidth: 0,
-      }}>
+      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 13, fontWeight: 600 }}>SSH 终端</div>
           <div style={{ marginTop: 3, fontSize: 12, opacity: .66, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             当前服务器：{targetLabel} · 字体 {fontSize}px
           </div>
         </div>
-
         {linkedAlias !== null ? (
           <>
-            <button
-              type="button"
-              disabled={active}
-              onClick={() => { connectTo(linkedAlias) }}
-              style={{
-                border: '1px solid rgba(128,128,128,.35)',
-                borderRadius: 6,
-                background: 'transparent',
-                color: 'inherit',
-                padding: '5px 10px',
-                cursor: active ? 'default' : 'pointer',
-                opacity: active ? .5 : 1,
-              }}
-            >
-              连接
-            </button>
-            <button
-              type="button"
-              disabled={!active}
-              onClick={() => {
-                teardown()
-                setStatus({ kind: 'idle' })
-              }}
-              style={{
-                border: '1px solid rgba(128,128,128,.35)',
-                borderRadius: 6,
-                background: 'transparent',
-                color: 'inherit',
-                padding: '5px 10px',
-                cursor: active ? 'pointer' : 'default',
-                opacity: active ? 1 : .5,
-              }}
-            >
-              断开
-            </button>
+            <button type="button" disabled={active} onClick={() => { connectTo(linkedAlias) }} style={{
+              border: '1px solid rgba(128,128,128,.35)', borderRadius: 6, background: 'transparent',
+              color: 'inherit', padding: '5px 10px', cursor: active ? 'default' : 'pointer', opacity: active ? .5 : 1,
+            }}>连接</button>
+            <button type="button" disabled={!active} onClick={() => { teardown(); setStatus({ kind: 'idle' }) }} style={{
+              border: '1px solid rgba(128,128,128,.35)', borderRadius: 6, background: 'transparent',
+              color: 'inherit', padding: '5px 10px', cursor: active ? 'pointer' : 'default', opacity: active ? 1 : .5,
+            }}>断开</button>
           </>
         ) : null}
       </div>
 
       {linkedAlias === null ? (
         <div style={{
-          flex: 1,
-          minHeight: 320,
-          border: '1px dashed rgba(128,128,128,.35)',
-          borderRadius: 8,
-          display: 'grid',
-          placeItems: 'center',
-          padding: 24,
-          textAlign: 'center',
-          opacity: .68,
-          fontSize: 13,
+          flex: 1, minHeight: 320, border: '1px dashed rgba(128,128,128,.35)', borderRadius: 8,
+          display: 'grid', placeItems: 'center', padding: 24, textAlign: 'center', opacity: .68, fontSize: 13,
         }}>
           当前会话还没有连接 SSH 服务器。请在页面顶部“标准模式”右侧的“连接服务器”中选择服务器。
         </div>
       ) : (
         <>
-          {status.kind === 'connecting' ? (
-            <div style={{ flex: 'none', padding: '7px 9px', borderRadius: 6, background: 'rgba(79,129,255,.10)', fontSize: 12 }}>
-              正在连接 {status.alias}…
-            </div>
-          ) : null}
-          {status.kind === 'connected' ? (
-            <div style={{ flex: 'none', padding: '7px 9px', borderRadius: 6, background: 'rgba(46,160,67,.10)', fontSize: 12 }}>
-              已连接 {status.alias}
-            </div>
-          ) : null}
-          {status.kind === 'exited' ? (
-            <div style={{ flex: 'none', padding: '7px 9px', borderRadius: 6, background: 'rgba(128,128,128,.10)', fontSize: 12 }}>
-              {status.alias} 的终端已断开{status.detail ? `：${status.detail}` : ''}
-            </div>
-          ) : null}
-          {status.kind === 'error' ? (
-            <div style={{ flex: 'none', padding: '7px 9px', borderRadius: 6, background: 'rgba(220,70,70,.10)', color: '#d9534f', fontSize: 12 }}>
-              SSH 终端错误：{status.detail}
-            </div>
-          ) : null}
+          {status.kind === 'connecting' ? <StatusBanner background="rgba(79,129,255,.10)">正在连接 {status.alias}…</StatusBanner> : null}
+          {status.kind === 'connected' ? <StatusBanner background="rgba(46,160,67,.10)">已连接 {status.alias}</StatusBanner> : null}
+          {status.kind === 'exited' ? <StatusBanner background="rgba(128,128,128,.10)">{status.alias} 的终端已断开{status.detail ? `：${status.detail}` : ''}</StatusBanner> : null}
+          {status.kind === 'error' ? <StatusBanner background="rgba(220,70,70,.10)" color="#d9534f">SSH 终端错误：{status.detail}</StatusBanner> : null}
 
           <div
             onContextMenu={event => {
@@ -635,41 +535,22 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
               pasteText(text)
             }}
             style={{
-              flex: 1,
-              minHeight: 360,
-              borderRadius: 8,
-              overflow: 'hidden',
-              background: '#0b0e14',
-              position: 'relative',
+              flex: 1, minHeight: 360, borderRadius: 8, overflow: 'hidden',
+              background: '#0b0e14', position: 'relative',
             }}
           >
             <div ref={containerRef} style={{ position: 'absolute', inset: 0, padding: 6 }} />
 
             {searchOpen ? (
-              <div
-                onPointerDown={event => { event.stopPropagation() }}
-                style={{
-                  position: 'absolute',
-                  top: 10,
-                  right: 14,
-                  zIndex: 8,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: 5,
-                  border: '1px solid rgba(255,255,255,.18)',
-                  borderRadius: 7,
-                  background: '#171b22',
-                  boxShadow: '0 8px 24px rgba(0,0,0,.35)',
-                }}
-              >
+              <div onPointerDown={event => { event.stopPropagation() }} style={{
+                position: 'absolute', top: 10, right: 14, zIndex: 8, display: 'flex', alignItems: 'center', gap: 4,
+                padding: 5, border: '1px solid rgba(255,255,255,.18)', borderRadius: 7,
+                background: '#171b22', boxShadow: '0 8px 24px rgba(0,0,0,.35)',
+              }}>
                 <input
                   ref={searchInputRef}
                   value={searchQuery}
-                  onChange={event => {
-                    searchQueryRef.current = event.target.value
-                    setSearchQuery(event.target.value)
-                  }}
+                  onChange={event => { searchQueryRef.current = event.target.value; setSearchQuery(event.target.value) }}
                   onKeyDown={event => {
                     if (event.key === 'Enter') {
                       event.preventDefault()
@@ -681,74 +562,31 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
                     }
                   }}
                   placeholder="搜索终端输出"
-                  style={{
-                    width: 190,
-                    border: '1px solid rgba(255,255,255,.16)',
-                    borderRadius: 5,
-                    outline: 'none',
-                    background: '#0f1319',
-                    color: '#e6edf3',
-                    padding: '5px 7px',
-                    fontSize: 12,
-                  }}
+                  style={{ width: 190, border: '1px solid rgba(255,255,255,.16)', borderRadius: 5, outline: 'none', background: '#0f1319', color: '#e6edf3', padding: '5px 7px', fontSize: 12 }}
                 />
                 <span style={{ minWidth: 42, textAlign: 'center', color: '#aab3c0', fontSize: 11 }}>
-                  {searchResult.count > 0 && searchResult.index >= 0
-                    ? `${searchResult.index + 1}/${searchResult.count}`
-                    : searchQuery === '' ? '' : '0/0'}
+                  {searchResult.count > 0 && searchResult.index >= 0 ? `${searchResult.index + 1}/${searchResult.count}` : searchQuery === '' ? '' : '0/0'}
                 </span>
-                <button
-                  type="button"
-                  title="区分大小写"
-                  onClick={() => {
-                    searchCaseSensitiveRef.current = !searchCaseSensitive
-                    setSearchCaseSensitive(!searchCaseSensitive)
-                  }}
-                  style={{
-                    border: 0,
-                    borderRadius: 4,
-                    background: searchCaseSensitive ? '#315b8a' : 'transparent',
-                    color: '#e6edf3',
-                    padding: '4px 6px',
-                    cursor: 'pointer',
-                    fontSize: 11,
-                  }}
-                >Aa</button>
-                <button type="button" title="上一个 (Shift+Enter / Shift+F3)" onClick={() => { searchPrevious() }} style={{ border: 0, background: 'transparent', color: '#e6edf3', cursor: 'pointer', padding: '3px 5px' }}>↑</button>
-                <button type="button" title="下一个 (Enter / F3)" onClick={() => { searchNext() }} style={{ border: 0, background: 'transparent', color: '#e6edf3', cursor: 'pointer', padding: '3px 5px' }}>↓</button>
-                <button type="button" title="关闭 (Esc)" onClick={closeSearch} style={{ border: 0, background: 'transparent', color: '#e6edf3', cursor: 'pointer', padding: '3px 5px' }}>×</button>
+                <button type="button" title="区分大小写" onClick={() => {
+                  searchCaseSensitiveRef.current = !searchCaseSensitive
+                  setSearchCaseSensitive(!searchCaseSensitive)
+                }} style={{ border: 0, borderRadius: 4, background: searchCaseSensitive ? '#315b8a' : 'transparent', color: '#e6edf3', padding: '4px 6px', cursor: 'pointer', fontSize: 11 }}>Aa</button>
+                <button type="button" title="上一个 (Shift+Enter / Shift+F3)" onClick={searchPrevious} style={searchButtonStyle}>↑</button>
+                <button type="button" title="下一个 (Enter / F3)" onClick={() => { searchNext() }} style={searchButtonStyle}>↓</button>
+                <button type="button" title="关闭 (Esc)" onClick={closeSearch} style={searchButtonStyle}>×</button>
               </div>
             ) : null}
 
             {actionMessage !== null ? (
               <div style={{
-                position: 'absolute',
-                left: '50%',
-                bottom: 16,
-                transform: 'translateX(-50%)',
-                zIndex: 9,
-                border: '1px solid rgba(255,255,255,.14)',
-                borderRadius: 6,
-                background: 'rgba(24,28,35,.94)',
-                color: '#d8dee9',
-                padding: '6px 10px',
-                fontSize: 12,
-                pointerEvents: 'none',
-              }}>
-                {actionMessage}
-              </div>
+                position: 'absolute', left: '50%', bottom: 16, transform: 'translateX(-50%)', zIndex: 9,
+                border: '1px solid rgba(255,255,255,.14)', borderRadius: 6, background: 'rgba(24,28,35,.94)',
+                color: '#d8dee9', padding: '6px 10px', fontSize: 12, pointerEvents: 'none',
+              }}>{actionMessage}</div>
             ) : null}
 
             {status.kind === 'idle' ? (
-              <div style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'grid',
-                placeItems: 'center',
-                color: '#8b949e',
-                pointerEvents: 'none',
-                fontSize: 13,
-              }}>
+              <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', color: '#8b949e', pointerEvents: 'none', fontSize: 13 }}>
                 当前终端已断开。服务器切换请使用页面顶部的 SSH 连接按钮。
               </div>
             ) : null}
@@ -759,16 +597,9 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
               onPointerDown={event => { event.stopPropagation() }}
               onContextMenu={event => { event.preventDefault() }}
               style={{
-                position: 'fixed',
-                left: contextMenu.x,
-                top: contextMenu.y,
-                zIndex: 10020,
-                width: 230,
-                padding: 5,
-                border: '1px solid rgba(128,128,128,.32)',
-                borderRadius: 7,
-                background: 'var(--color-background, #fff)',
-                color: 'var(--color-foreground, #1f2328)',
+                position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 10020, width: 230, padding: 5,
+                border: '1px solid rgba(128,128,128,.32)', borderRadius: 7,
+                background: 'var(--color-background, #fff)', color: 'var(--color-foreground, #1f2328)',
                 boxShadow: '0 10px 28px rgba(0,0,0,.22)',
               }}
             >
@@ -781,18 +612,14 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
               <button type="button" onClick={selectAll} style={menuButton()}>
                 <span>全选</span><span style={{ opacity: .55 }}>Ctrl+Shift+A</span>
               </button>
-
-              <div style={{ height: 1, margin: '4px 3px', background: 'rgba(128,128,128,.22)' }} />
-
+              <MenuDivider />
               <button type="button" onClick={openSearch} style={menuButton()}>
                 <span>搜索</span><span style={{ opacity: .55 }}>Ctrl+F</span>
               </button>
               <button type="button" onClick={clearScreen} style={menuButton()}>
                 <span>清屏</span><span style={{ opacity: .55 }}>Ctrl+L</span>
               </button>
-
-              <div style={{ height: 1, margin: '4px 3px', background: 'rgba(128,128,128,.22)' }} />
-
+              <MenuDivider />
               <button type="button" disabled={fontSize >= MAX_FONT_SIZE} onClick={() => { setContextMenu(null); applyFontSize(fontSizeRef.current + 1) }} style={menuButton(fontSize >= MAX_FONT_SIZE)}>
                 <span>放大字体</span><span style={{ opacity: .55 }}>Ctrl++</span>
               </button>
@@ -802,9 +629,8 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
               <button type="button" onClick={() => { setContextMenu(null); applyFontSize(DEFAULT_FONT_SIZE) }} style={menuButton()}>
                 <span>恢复默认字体</span><span style={{ opacity: .55 }}>Ctrl+0</span>
               </button>
-
               <div style={{ padding: '5px 9px 3px', opacity: .5, fontSize: 11 }}>
-                当前字体：{fontSize}px · Ctrl+C 在有选区时复制，否则发送中断信号
+                当前字体：{fontSize}px · Ctrl+C 有选区时复制，否则发送中断信号
               </div>
             </div>
           ) : null}
@@ -813,3 +639,19 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
     </div>
   )
 }
+
+function StatusBanner({ children, background, color = 'inherit' }: { children: React.ReactNode; background: string; color?: string }) {
+  return <div style={{ flex: 'none', padding: '7px 9px', borderRadius: 6, background, color, fontSize: 12 }}>{children}</div>
+}
+
+function MenuDivider() {
+  return <div style={{ height: 1, margin: '4px 3px', background: 'rgba(128,128,128,.22)' }} />
+}
+
+const searchButtonStyle = {
+  border: 0,
+  background: 'transparent',
+  color: '#e6edf3',
+  cursor: 'pointer',
+  padding: '3px 5px',
+} as const
