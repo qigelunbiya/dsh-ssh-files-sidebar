@@ -1,6 +1,7 @@
 import { apply as applySsh } from '@linxin666/dsh-ssh'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
 import { installLinkedSsh } from './linked-ssh.ts'
+import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
@@ -70,10 +71,14 @@ export function apply(ctx: any): void {
   const hosts = new SharedDshSshHostTable()
 
   // Session-scoped Linked SSH bindings live on the host as well as in the
-  // browser cache. This gives the model a deterministic LOCAL/REMOTE context:
-  // native tools stay local, ssh_* tools use the bound alias as the default
-  // remote target.
-  installLinkedSsh(ctx, hosts)
+  // browser cache. This gives the model a deterministic LOCAL/REMOTE context.
+  const linkedStore = installLinkedSsh(ctx, hosts)
+
+  // Session-bound model tools remove the alias parameter entirely. The server
+  // selected in the conversation header is injected by the plugin at execution
+  // time, so the model cannot accidentally call ssh_exec without an alias or
+  // drift away from SSH Files / SSH Terminal.
+  installLinkedSshAgentTools(ctx, linkedStore)
 
   // Remote workspace + native Read/Write/Edit/Glob/Grep/Bash shim, sharing the
   // dsh-ssh host store instead of maintaining a second SSH configuration.
