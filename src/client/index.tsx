@@ -119,6 +119,66 @@ function installSshFilesContextMenuPositionFix(): () => void {
   }
 }
 
+/**
+ * Keep the session terminal's familiar shortcuts local to the terminal.
+ *
+ * xterm's custom key handler decides whether a key is forwarded to the PTY,
+ * but returning false does not reliably cancel Chrome's page-level defaults.
+ * This capture listener prevents browser zoom/find/reset while still allowing
+ * the xterm handler to run afterwards.
+ *
+ * Clipboard paste is the opposite case: Ctrl+V must stay a native browser paste
+ * event. When clipboard-read permission is granted, the terminal's explicit
+ * navigator.clipboard.readText() path and the browser paste event can both fire,
+ * producing duplicate text. Stop only the keydown propagation here (without
+ * preventDefault) so the browser performs exactly one native paste event.
+ */
+function installSessionTerminalBrowserShortcutCompatibility(): () => void {
+  const isSessionTerminalTarget = (target: EventTarget | null): boolean => {
+    if (!(target instanceof HTMLElement)) return false
+    const xterm = target.closest('.xterm')
+    if (xterm === null) return false
+    // The original full SSH management panel is mounted under this marker.
+    // Leave its keyboard behavior untouched; this compatibility layer is only
+    // for the conversation-level Linked SSH terminal.
+    return target.closest('[data-dsh-ssh-view]') === null
+  }
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (!isSessionTerminalTarget(event.target)) return
+
+    const mod = event.ctrlKey || event.metaKey
+    const key = event.key.toLowerCase()
+
+    // Let the browser/xterm native paste event be the one and only paste path.
+    // Do not call preventDefault: that would suppress the actual paste event.
+    if ((mod && key === 'v') || (event.shiftKey && event.key === 'Insert')) {
+      event.stopPropagation()
+      return
+    }
+
+    if (!mod) return
+
+    const terminalOwnedBrowserShortcut =
+      key === 'f' ||
+      key === '0' ||
+      key === '-' ||
+      key === '=' ||
+      key === '+' ||
+      (event.shiftKey && (key === 'c' || key === 'a'))
+
+    if (terminalOwnedBrowserShortcut) {
+      // Prevent Chrome page zoom / reset, browser find, DevTools element picker,
+      // etc., while keeping propagation so SessionSshTerminalView's xterm key
+      // handler can perform the corresponding terminal action.
+      event.preventDefault()
+    }
+  }
+
+  document.addEventListener('keydown', onKeyDown, true)
+  return () => { document.removeEventListener('keydown', onKeyDown, true) }
+}
+
 // We compose the original dsh-ssh browser UI inside this one client plugin.
 // Because we call its apply() directly, our wrapper must declare every Cordis
 // service that the embedded client may access. In particular dsh-ssh's current
@@ -146,6 +206,7 @@ export function apply(ctx: any): void {
   registerWorkspaceDirectoryFlow(ctx)
 
   ctx.effect(installSshFilesContextMenuPositionFix, 'dsh-ssh-files-sidebar: context menu viewport fix')
+  ctx.effect(installSessionTerminalBrowserShortcutCompatibility, 'dsh-ssh-files-sidebar: session terminal browser shortcut compatibility')
 
   // Linked SSH is session-scoped and additive: a local Workspace stays local,
   // while the session can independently point at one configured SSH host.
