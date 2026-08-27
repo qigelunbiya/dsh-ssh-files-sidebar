@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { transform } from 'lightningcss'
 import type { UserConfig } from 'tsdown'
@@ -6,13 +7,18 @@ import type { UserConfig } from 'tsdown'
 const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client']
 const CSS_VIRTUAL_PREFIX = '\0dsh-ssh-files-css:'
 const CSS_VIRTUAL_SUFFIX = '.mjs'
+const require = createRequire(import.meta.url)
 
 const inlineCssModulesPlugin = {
   name: 'dsh-ssh-files-sidebar:inline-css-modules',
   resolveId(source: string, importer?: string) {
     if (!source.endsWith('.module.css') || importer === undefined) return null
     const importerPath = importer.split('?')[0] ?? importer
-    const physical = resolve(dirname(importerPath), source)
+    // Relative CSS belongs beside its importer; bare package subpaths must go
+    // through Node's resolver so pnpm's virtual-store location is respected.
+    const physical = source.startsWith('.') || source.startsWith('/')
+      ? resolve(dirname(importerPath), source)
+      : require.resolve(source, { paths: [dirname(importerPath), process.cwd()] })
     return CSS_VIRTUAL_PREFIX + physical + CSS_VIRTUAL_SUFFIX
   },
   async load(id: string) {
