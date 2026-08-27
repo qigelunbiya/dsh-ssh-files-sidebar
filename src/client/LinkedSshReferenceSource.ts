@@ -35,10 +35,6 @@ const SEARCH_LIMIT = 60
 const RECURSIVE_SEARCH_TIMEOUT_MS = 5_000
 const SEARCH_ROOTS = ['/apps', '/app', '/opt', '/srv', '/var/www', '/home', '/root'] as const
 
-function queryString(params: Record<string, string>): string {
-  return new URLSearchParams(params).toString()
-}
-
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'"'"'`)}'`
 }
@@ -151,8 +147,7 @@ function recursiveSearchCommand(term: string): string {
     `    -type d \\( -name node_modules -o -name .git -o -name .cache \\) -prune`,
     `    -o \\( -type f -o -type d \\) -iname ${pattern} -printf '%y\\t%p\\n'`,
     '  \\) 2>/dev/null',
-    'done',
-    `| head -n ${SEARCH_LIMIT}`,
+    `done | head -n ${SEARCH_LIMIT}`,
   ].join('\n')
 }
 
