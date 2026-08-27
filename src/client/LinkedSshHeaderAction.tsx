@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { listHosts, type SshHostSummary } from './api.ts'
 import { remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
+import { OPEN_LINKED_TERMINAL_EVENT } from './linked-ssh-events.ts'
 import { setLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
 
 interface HeaderActionProps {
@@ -29,6 +30,7 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
   const [open, setOpen] = useState(false)
   const [hosts, setHosts] = useState<SshHostSummary[]>([])
   const [loading, setLoading] = useState(false)
+  const [bindingBusy, setBindingBusy] = useState(false)
   const [error, setError] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -63,6 +65,28 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
 
   const currentHost = hosts.find(host => host.alias === effectiveAlias)
 
+  const changeBinding = async (alias: string | null): Promise<void> => {
+    if (remoteWorkspaceAlias !== null) return
+    setBindingBusy(true)
+    setError('')
+    try {
+      await setLinkedSshAlias(sessionId, alias)
+      setOpen(false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason))
+    } finally {
+      setBindingBusy(false)
+    }
+  }
+
+  const openTerminal = (): void => {
+    if (effectiveAlias === null) return
+    document.dispatchEvent(new CustomEvent(OPEN_LINKED_TERMINAL_EVENT, {
+      detail: { alias: effectiveAlias, autoConnect: true },
+    }))
+    setOpen(false)
+  }
+
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       <button
@@ -89,8 +113,8 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
             top: 'calc(100% + 7px)',
             left: 0,
             zIndex: 2147482500,
-            width: 290,
-            maxWidth: 'min(90vw, 290px)',
+            width: 300,
+            maxWidth: 'min(90vw, 300px)',
             border: '1px solid rgba(128,128,128,.28)',
             borderRadius: 10,
             background: 'var(--dsw-alias-bg-layer-1, #18181b)',
@@ -102,7 +126,7 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
           <div style={{ padding: '5px 7px 8px', fontSize: 12, opacity: .68 }}>
             {remoteWorkspaceAlias
               ? '这是远程 SSH 工作区，服务器由工作区本身决定。'
-              : '当前 Workspace 保持在本机；这里只绑定服务器，普通 Read / Write / Bash 仍然操作本机。'}
+              : 'Workspace 保持在本机；普通 Read / Write / Bash 继续操作本机，ssh_* 操作这里绑定的服务器。'}
           </div>
 
           {effectiveAlias ? (
@@ -112,11 +136,21 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
             </div>
           ) : null}
 
+          {effectiveAlias ? (
+            <button
+              type="button"
+              onClick={openTerminal}
+              style={{ ...buttonStyle, width: '100%', borderColor: 'transparent', textAlign: 'left', marginBottom: 4 }}
+            >
+              打开 SSH 终端
+            </button>
+          ) : null}
+
           {loading ? <div style={{ padding: 9, fontSize: 12, opacity: .65 }}>正在读取 SSH 主机…</div> : null}
           {error ? <div style={{ padding: 9, color: '#e06c75', fontSize: 12 }}>{error}</div> : null}
 
           {!loading && !remoteWorkspaceAlias ? (
-            <div style={{ maxHeight: 230, overflow: 'auto' }}>
+            <div style={{ maxHeight: 230, overflow: 'auto', opacity: bindingBusy ? .55 : 1, pointerEvents: bindingBusy ? 'none' : 'auto' }}>
               {hosts.length === 0 && !error ? <div style={{ padding: 9, fontSize: 12, opacity: .55 }}>还没有 SSH 主机，请先在左侧「SSH」中添加。</div> : null}
               {hosts.map(host => {
                 const selected = linkedAlias === host.alias
@@ -124,10 +158,7 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
                   <button
                     key={host.alias}
                     type="button"
-                    onClick={() => {
-                      setLinkedSshAlias(sessionId, host.alias)
-                      setOpen(false)
-                    }}
+                    onClick={() => { void changeBinding(host.alias) }}
                     style={{
                       width: '100%',
                       border: 0,
@@ -151,13 +182,11 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
             <div style={{ borderTop: '1px solid rgba(128,128,128,.20)', marginTop: 6, paddingTop: 6 }}>
               <button
                 type="button"
-                onClick={() => {
-                  setLinkedSshAlias(sessionId, null)
-                  setOpen(false)
-                }}
-                style={{ ...buttonStyle, width: '100%', borderColor: 'transparent', textAlign: 'left' }}
+                disabled={bindingBusy}
+                onClick={() => { void changeBinding(null) }}
+                style={{ ...buttonStyle, width: '100%', borderColor: 'transparent', textAlign: 'left', opacity: bindingBusy ? .55 : 1 }}
               >
-                断开服务器连接
+                {bindingBusy ? '正在更新连接…' : '断开服务器连接'}
               </button>
             </div>
           ) : null}
