@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { Terminal, type IDisposable } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import type { SshApi, TerminalConnection } from '@linxin666/dsh-ssh/src/client/api.ts'
-import type { SshHostSummary } from '@linxin666/dsh-ssh/src/protocol.ts'
-import { XTERM_CSS } from '@linxin666/dsh-ssh/src/client/panel/xterm.css.ts'
-import { errorMessage, tt } from '@linxin666/dsh-ssh/src/client/panel/helpers.ts'
-import css from '@linxin666/dsh-ssh/src/client/panel/panel.module.css'
+import {
+  XTERM_CSS,
+  errorMessage,
+  panelCss as css,
+  tt,
+  type SshApi,
+  type SshHostSummaryBridge,
+  type TerminalConnectionBridge,
+} from './ssh-panel-bridge.js'
 
 interface LinkedTerminalTabProps {
   api: SshApi
@@ -38,13 +42,13 @@ function ensureXtermCss(): void {
  * open the SSH panel and immediately connect the session's bound alias.
  */
 export function LinkedTerminalTab({ api, presetAlias, requestId, autoConnect = false }: LinkedTerminalTabProps) {
-  const [hosts, setHosts] = useState<SshHostSummary[]>([])
+  const [hosts, setHosts] = useState<SshHostSummaryBridge[]>([])
   const [alias, setAlias] = useState(presetAlias ?? '')
   const [status, setStatus] = useState<TerminalStatus>({ kind: 'idle' })
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
-  const connRef = useRef<TerminalConnection | null>(null)
+  const connRef = useRef<TerminalConnectionBridge | null>(null)
   const dataSubRef = useRef<IDisposable | null>(null)
   const lastAutoRequestRef = useRef<number | undefined>(undefined)
 
@@ -130,7 +134,7 @@ export function LinkedTerminalTab({ api, presetAlias, requestId, autoConnect = f
     dataSubRef.current = term.onData(data => { connection.send(data) })
     connection.onReady = () => { setStatus({ kind: 'connected', alias: target }) }
     connection.onOutput = data => { term.write(data) }
-    connection.onExit = (code, error) => {
+    connection.onExit = (_code, error) => {
       if (settled) return
       settled = true
       dataSubRef.current?.dispose()
@@ -150,8 +154,6 @@ export function LinkedTerminalTab({ api, presetAlias, requestId, autoConnect = f
     lastAutoRequestRef.current = requestId
     const frame = window.requestAnimationFrame(() => { connect(presetAlias) })
     return () => window.cancelAnimationFrame(frame)
-    // status is intentionally not a dependency: requestId is the command edge.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoConnect, presetAlias, requestId])
 
   const disconnect = (): void => {
