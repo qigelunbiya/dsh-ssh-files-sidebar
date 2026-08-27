@@ -1,7 +1,10 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
+import { getLinkedSshBinding, saveLinkedSshBinding } from './api.ts'
 
 const STORAGE_PREFIX = 'dsh-ssh-files-sidebar:linked-ssh:v1:'
 const EVENT_NAME = 'dsh-ssh-files-sidebar:linked-ssh-changed'
+const hydrated = new Set<string>()
+const hydrating = new Map<string, Promise<void>>()
 
 function storageKey(sessionId: string): string {
   return `${STORAGE_PREFIX}${sessionId}`
@@ -13,7 +16,7 @@ function normalizeAlias(value: unknown): string | null {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(alias) ? alias : null
 }
 
-/** Read the SSH host linked to one DSH session. */
+/** Read the browser cache for one DSH session. Host persistence is authoritative. */
 export function getLinkedSshAlias(sessionId?: string): string | null {
   if (!sessionId || typeof window === 'undefined') return null
   try {
@@ -23,18 +26,65 @@ export function getLinkedSshAlias(sessionId?: string): string | null {
   }
 }
 
-/** Link or unlink one DSH session from an existing dsh-ssh host alias. */
-export function setLinkedSshAlias(sessionId: string, alias: string | null): void {
-  if (!sessionId || typeof window === 'undefined') return
-  const normalized = alias === null ? null : normalizeAlias(alias)
+function publishLocal(sessionId: string, alias: string | null): void {
+  if (typeof window === 'undefined') return
   try {
-    if (normalized === null) window.localStorage.removeItem(storageKey(sessionId))
-    else window.localStorage.setItem(storageKey(sessionId), normalized)
+    if (alias === null) window.localStorage.removeItem(storageKey(sessionId))
+    else window.localStorage.setItem(storageKey(sessionId), alias)
   } catch {
-    // Storage can be unavailable in hardened browser contexts. The custom event
-    // still lets the current page converge to the attempted state if possible.
+    // Hardened browser contexts may reject storage; the same-page event still
+    // lets mounted consumers re-read whatever storage state is available.
   }
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { sessionId } }))
+}
+
+/**
+ * Load the host-side binding once per page. Existing 0.5.0 browser-only state
+ * is migrated forward automatically when the host has no binding yet.
+ */
+export function hydrateLinkedSshAlias(sessionId: string): Promise<void> {
+  if (!sessionId || typeof window === 'undefined' || hydrated.has(sessionId)) return Promise.resolve()
+  const active = hydrating.get(sessionId)
+  if (active !== undefined) return active
+
+  const task = (async () => {
+    const cached = getLinkedSshAlias(sessionId)
+    try {
+      const binding = await getLinkedSshBinding(sessionId)
+      if (binding !== null) {
+        publishLocal(sessionId, binding.alias)
+      } else if (cached !== null) {
+        // 0.5.0 stored Linked SSH only in localStorage. Preserve the user's
+        // working setup by promoting that cache to the new host-side store.
+        const migrated = await saveLinkedSshBinding(sessionId, cached)
+        publishLocal(sessionId, migrated?.alias ?? cached)
+      } else {
+        publishLocal(sessionId, null)
+      }
+      hydrated.add(sessionId)
+    } catch (error) {
+      // Keep the browser cache usable even if the host route temporarily fails.
+      console.warn('[dsh-ssh-files-sidebar] Linked SSH hydrate failed:', error)
+    } finally {
+      hydrating.delete(sessionId)
+    }
+  })()
+  hydrating.set(sessionId, task)
+  return task
+}
+
+/**
+ * Link or unlink one DSH session from an existing dsh-ssh host alias.
+ * The host store is written first so the Agent context and the UI cannot claim
+ * different targets after a successful interaction.
+ */
+export async function setLinkedSshAlias(sessionId: string, alias: string | null): Promise<void> {
+  if (!sessionId || typeof window === 'undefined') return
+  const normalized = alias === null ? null : normalizeAlias(alias)
+  if (alias !== null && normalized === null) throw new Error('invalid SSH alias')
+  const binding = await saveLinkedSshBinding(sessionId, normalized)
+  publishLocal(sessionId, binding?.alias ?? null)
+  hydrated.add(sessionId)
 }
 
 function subscribe(sessionId: string, listener: () => void): () => void {
@@ -58,6 +108,10 @@ function subscribe(sessionId: string, listener: () => void): () => void {
 
 /** Reactive session binding used by the header action and SSH Files tab. */
 export function useLinkedSshAlias(sessionId: string): string | null {
+  useEffect(() => {
+    void hydrateLinkedSshAlias(sessionId)
+  }, [sessionId])
+
   return useSyncExternalStore(
     listener => subscribe(sessionId, listener),
     () => getLinkedSshAlias(sessionId),
