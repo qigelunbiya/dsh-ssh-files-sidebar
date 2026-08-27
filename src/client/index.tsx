@@ -1,6 +1,37 @@
 import { apply as applySshClient } from './embedded-ssh-client.js'
+import { LinkedSshHeaderAction } from './LinkedSshHeaderAction.tsx'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
+import { getLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
+
+function linkedAliasPlaceholder(alias: string): string {
+  // RemoteFilesTab already derives its fixed SSH host from a dsh-rw placeholder
+  // cwd. For a local+Linked-SSH session we feed it an equivalent synthetic cwd
+  // only for alias routing; the actual DSH Workspace remains completely local.
+  return `C:/.dsh/remote-workspaces/${alias}/__linked__`
+}
+
+function RemoteFilesForScope({ scope }: { scope: any }) {
+  const sessionId = scope?.sessionId ?? 'global'
+  const remoteAlias = remoteWorkspaceAliasFromCwd(scope?.cwd)
+  const linkedAlias = useLinkedSshAlias(sessionId)
+  const effectiveAlias = remoteAlias ?? linkedAlias
+
+  if (effectiveAlias === null) {
+    return (
+      <div style={{ height: '100%', display: 'grid', placeItems: 'center', padding: 18, textAlign: 'center', opacity: .68, fontSize: 12 }}>
+        当前会话没有 SSH 目标。请在会话顶部点击“连接服务器”，或使用“添加工作区 → 远程 SSH”。
+      </div>
+    )
+  }
+
+  return (
+    <RemoteFilesTab
+      sessionId={sessionId}
+      workspaceCwd={remoteAlias !== null ? scope?.cwd : linkedAliasPlaceholder(effectiveAlias)}
+    />
+  )
+}
 
 // better-sidebar may render its pane inside a transformed containing block.
 // In CSS, a transformed ancestor becomes the containing block for descendants
@@ -114,19 +145,27 @@ export function apply(ctx: any): void {
 
   ctx.effect(installSshFilesContextMenuPositionFix, 'dsh-ssh-files-sidebar: context menu viewport fix')
 
+  // Linked SSH is session-scoped and additive: a local Workspace stays local,
+  // while the session can independently point at one configured SSH host.
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
+    id: 'linked-ssh',
+    order: 5,
+    label: 'SSH',
+  }, LinkedSshHeaderAction))
+
   ctx.effect(() => ctx.betterSidebar.registerTab({
     id: 'dsh-ssh-files-sidebar:files',
     title: 'SSH Files',
     order: 15,
     single: true,
-    // Do not offer SSH Files in local workspaces. dsh-rw remote workspaces are
-    // represented by ~/.dsh/remote-workspaces/<alias>/<workspace> placeholders.
-    available: (_ctx: any, scope: any) => remoteWorkspaceAliasFromCwd(scope?.cwd) !== null,
-    component: ({ scope }: any) => (
-      <RemoteFilesTab
-        sessionId={scope?.sessionId ?? 'global'}
-        workspaceCwd={scope?.cwd}
-      />
-    ),
+    // SSH Files is available either for a native Remote Workspace or when the
+    // current local session has an explicit Linked SSH target.
+    available: (_ctx: any, scope: any) => {
+      const remoteAlias = remoteWorkspaceAliasFromCwd(scope?.cwd)
+      if (remoteAlias !== null) return true
+      return getLinkedSshAlias(scope?.sessionId) !== null
+    },
+    component: ({ scope }: any) => <RemoteFilesForScope scope={scope} />,
   }), 'dsh-ssh-files-sidebar: register tab')
 }
