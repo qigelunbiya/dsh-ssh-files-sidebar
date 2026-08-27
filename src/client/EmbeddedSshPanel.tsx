@@ -10,7 +10,7 @@ import {
   type SshApi,
 } from './ssh-panel-bridge.js'
 import { LinkedTerminalTab } from './LinkedTerminalTab.tsx'
-import { OPEN_LINKED_TERMINAL_EVENT } from './linked-ssh-events.ts'
+import { subscribeLinkedTerminal } from './linked-terminal-bridge.ts'
 
 type SshTab = 'hosts' | 'terminal' | 'transfer' | 'tunnels' | 'cluster'
 
@@ -34,34 +34,28 @@ const TABS: ReadonlyArray<{ id: SshTab; label: () => string }> = [
 ]
 
 /**
- * The upstream SSH panel plus one supported bridge event. Linked SSH can open
- * the panel at Terminal with its session alias already selected/connected,
- * while all original Hosts/Transfer/Tunnel/Cluster behavior remains intact.
+ * The upstream SSH panel plus one integration bridge. Linked SSH can open the
+ * panel at Terminal with its session alias already selected/connected. The
+ * bridge retains the latest request, so a click is not lost if the panel React
+ * tree is being mounted or remounted at that exact moment.
  */
 export function EmbeddedSshPanel({ controller, api }: EmbeddedSshPanelProps) {
   const [activeTab, setActiveTab] = useState<SshTab>('hosts')
   const [connectRequest, setConnectRequest] = useState<ConnectRequest | null>(null)
 
-  const requestTerminal = (alias: string, autoConnect: boolean): void => {
+  const requestTerminal = (alias: string, autoConnect: boolean, nonce?: number): void => {
     setActiveTab('terminal')
     setConnectRequest(previous => ({
       alias,
       autoConnect,
-      nonce: (previous?.nonce ?? 0) + 1,
+      nonce: nonce ?? ((previous?.nonce ?? 0) + 1),
     }))
     controller.open()
   }
 
-  useEffect(() => {
-    const onOpen = (event: Event): void => {
-      const detail = (event as CustomEvent<{ alias?: unknown; autoConnect?: unknown }>).detail
-      const alias = typeof detail?.alias === 'string' ? detail.alias.trim() : ''
-      if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(alias)) return
-      requestTerminal(alias, detail?.autoConnect !== false)
-    }
-    document.addEventListener(OPEN_LINKED_TERMINAL_EVENT, onOpen)
-    return () => document.removeEventListener(OPEN_LINKED_TERMINAL_EVENT, onOpen)
-  }, [controller])
+  useEffect(() => subscribeLinkedTerminal(request => {
+    requestTerminal(request.alias, request.autoConnect, request.nonce)
+  }), [controller])
 
   const handleConnect = (alias: string): void => {
     requestTerminal(alias, false)
