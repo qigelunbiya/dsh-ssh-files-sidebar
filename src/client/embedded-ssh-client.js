@@ -6,6 +6,7 @@ import { en, zh } from '@linxin666/dsh-ssh/src/client/locales.ts'
 import { PanelController } from '@linxin666/dsh-ssh/src/client/panel/controller.ts'
 import { mountSidebarEntry } from '@linxin666/dsh-ssh/src/client/sidebar-entry.ts'
 import { mountEmbeddedSshPanel } from './EmbeddedSshMount.tsx'
+import { bindLinkedTerminalPanelOpener } from './linked-terminal-bridge.ts'
 
 const NS = 'dsh-ssh'
 
@@ -20,6 +21,10 @@ export function apply(ctx) {
   const api = new SshApi()
   const disposers = []
   try {
+    // Bind the controller before either DOM mount. A Linked SSH terminal request
+    // can therefore open the SSH center surface even if its React tree is still
+    // waiting for the conversation column to appear or is being remounted.
+    disposers.push(bindLinkedTerminalPanelOpener(() => controller.open()))
     disposers.push(mountSidebarEntry(controller))
     disposers.push(mountEmbeddedSshPanel(controller, api))
   } catch (error) {
