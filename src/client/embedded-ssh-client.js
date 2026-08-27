@@ -6,6 +6,7 @@ import { en, zh } from '@linxin666/dsh-ssh/src/client/locales.ts'
 import { PanelController } from '@linxin666/dsh-ssh/src/client/panel/controller.ts'
 import { mountSidebarEntry } from '@linxin666/dsh-ssh/src/client/sidebar-entry.ts'
 import { mountEmbeddedSshPanel } from './EmbeddedSshMount.tsx'
+import { registerLinkedSshReferenceSource } from './LinkedSshReferenceSource.ts'
 import { bindLinkedTerminalPanelOpener } from './linked-terminal-bridge.ts'
 
 const NS = 'dsh-ssh'
@@ -16,6 +17,13 @@ const NS = 'dsh-ssh'
  */
 export function apply(ctx) {
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-ssh: dictionaries')
+
+  // DSH's composer owns one shared '/' + '@' trigger registry. Register a
+  // second @ source only after that service is live, so the built-in local
+  // file/session candidates and Linked SSH candidates can coexist in one menu.
+  ctx.inject(['inputTriggers'], (scope) => {
+    registerLinkedSshReferenceSource(scope)
+  })
 
   const controller = new PanelController()
   const api = new SshApi()
