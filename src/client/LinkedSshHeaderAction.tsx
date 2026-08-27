@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { listHosts, type SshHostSummary } from './api.ts'
 import { remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
-import { requestLinkedTerminal } from './linked-terminal-bridge.ts'
 import { setLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
 
 interface HeaderActionProps {
@@ -79,12 +78,6 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
     }
   }
 
-  const openTerminal = (): void => {
-    if (effectiveAlias === null) return
-    requestLinkedTerminal(effectiveAlias, true)
-    setOpen(false)
-  }
-
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
       <button
@@ -124,7 +117,7 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
           <div style={{ padding: '5px 7px 8px', fontSize: 12, opacity: .68 }}>
             {remoteWorkspaceAlias
               ? '这是远程 SSH 工作区，服务器由工作区本身决定。'
-              : 'Workspace 保持在本机；普通 Read / Write / Bash 继续操作本机，ssh_* 操作这里绑定的服务器。'}
+              : 'Workspace 保持在本机；普通 Read / Write / Bash 继续操作本机。这里是当前会话唯一的 SSH 目标，SSH Files、SSH 终端和 ssh_* 都会跟随它。'}
           </div>
 
           {effectiveAlias ? (
@@ -132,16 +125,6 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
               <div style={{ fontWeight: 600 }}>{effectiveAlias}</div>
               {currentHost ? <div style={{ marginTop: 3, opacity: .68 }}>{currentHost.user}@{currentHost.host}:{currentHost.port}</div> : null}
             </div>
-          ) : null}
-
-          {effectiveAlias ? (
-            <button
-              type="button"
-              onClick={openTerminal}
-              style={{ ...buttonStyle, width: '100%', borderColor: 'transparent', textAlign: 'left', marginBottom: 4 }}
-            >
-              打开 SSH 终端
-            </button>
           ) : null}
 
           {loading ? <div style={{ padding: 9, fontSize: 12, opacity: .65 }}>正在读取 SSH 主机…</div> : null}
