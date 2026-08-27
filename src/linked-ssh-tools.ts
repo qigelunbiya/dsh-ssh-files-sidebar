@@ -1,4 +1,3 @@
-import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { LinkedSshBindingStore } from './linked-ssh.ts'
 
 interface ExecValue {
@@ -16,6 +15,16 @@ interface TransferValue {
   transferredBytes?: number
   files?: number
   bytes?: number
+  error?: string
+}
+
+interface ListDirValue {
+  alias: string
+  path: string
+  success: boolean
+  exitCode: number | null
+  stdout: string
+  stderr: string
   error?: string
 }
 
@@ -80,36 +89,49 @@ function renderExec(value: ExecValue): string {
   return parts.join('\n')
 }
 
+const EXEC_OUTPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    success: { type: 'boolean' },
+    exitCode: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+    timedOut: { type: 'boolean' },
+    stdout: { type: 'string' },
+    stderr: { type: 'string' },
+    durationMs: { type: 'integer' },
+    error: { type: 'string' },
+  },
+  required: ['success', 'exitCode', 'timedOut', 'stdout', 'stderr', 'durationMs'],
+} as const
+
 /**
  * Register model-facing tools that infer the SSH alias from the current DSH
  * session. They intentionally remove the alias parameter from the model's job:
  * the header Linked SSH selector is the only source of truth.
+ *
+ * These are raw ToolDefinition objects rather than defineTool() wrappers. That
+ * keeps this integration on the ToolRuntime service already supplied by DSH and
+ * avoids adding another top-level @deepseek-ai/* package whose prerelease peer
+ * graph may not match the operator's Harness checkout.
  */
 export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStore): void {
-  const linkedExec = defineTool({
+  const linkedExec = {
     name: 'linked_ssh_exec',
     description: 'Execute a command on the SSH server linked to THIS session. No host alias is required or allowed. Use this for remote/server commands, logs, services, deployment inspection, and remote filesystem operations when the session header shows a Linked SSH target.',
     parameters: {
-      command: { type: 'string', required: true, description: 'Shell command to run on the currently linked remote server.' },
-      timeoutMs: { type: 'integer', description: 'Optional timeout in milliseconds.' },
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        command: { type: 'string', description: 'Shell command to run on the currently linked remote server.' },
+        timeoutMs: { type: 'integer', description: 'Optional timeout in milliseconds.' },
+      },
+      required: ['command'],
     },
     output: {
-      schema: {
-        type: 'object',
-        additionalProperties: false,
-        properties: {
-          success: { type: 'boolean', required: true },
-          exitCode: { oneOf: [{ type: 'integer' }, { type: 'null' }], required: true },
-          timedOut: { type: 'boolean', required: true },
-          stdout: { type: 'string', required: true },
-          stderr: { type: 'string', required: true },
-          durationMs: { type: 'integer', required: true },
-          error: { type: 'string' },
-        },
-      },
-      render: (_args, value: ExecValue) => text(renderExec(value)),
+      schema: EXEC_OUTPUT_SCHEMA,
+      render: (_args: any, value: ExecValue) => text(renderExec(value)),
     },
-    async execute(args, exec) {
+    async execute(args: { command: string; timeoutMs?: number }, exec: any): Promise<ExecValue> {
       const alias = linkedAlias(store, exec)
       return await callNested(ctx, exec, 'ssh_exec', {
         alias,
@@ -117,36 +139,42 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
         ...(args.timeoutMs === undefined ? {} : { timeoutMs: args.timeoutMs }),
       }) as ExecValue
     },
-  })
+  }
 
-  const linkedListDir = defineTool({
+  const linkedListDir = {
     name: 'linked_ssh_list_dir',
     description: 'List a directory on the SSH server linked to THIS session. Prefer this instead of local Glob/Pwsh when the user asks about a remote/server directory or a path visible in SSH Files. If the user says a common Linux top-level directory such as apps/etc/var without a leading slash, it is interpreted as /apps, /etc, /var, etc.',
     parameters: {
-      path: { type: 'string', required: true, description: 'Remote directory path, preferably absolute (for example /apps).' },
-      all: { type: 'boolean', description: 'Include hidden files. Defaults to true.' },
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        path: { type: 'string', description: 'Remote directory path, preferably absolute (for example /apps).' },
+        all: { type: 'boolean', description: 'Include hidden files. Defaults to true.' },
+      },
+      required: ['path'],
     },
     output: {
       schema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          alias: { type: 'string', required: true },
-          path: { type: 'string', required: true },
-          success: { type: 'boolean', required: true },
-          exitCode: { oneOf: [{ type: 'integer' }, { type: 'null' }], required: true },
-          stdout: { type: 'string', required: true },
-          stderr: { type: 'string', required: true },
+          alias: { type: 'string' },
+          path: { type: 'string' },
+          success: { type: 'boolean' },
+          exitCode: { oneOf: [{ type: 'integer' }, { type: 'null' }] },
+          stdout: { type: 'string' },
+          stderr: { type: 'string' },
           error: { type: 'string' },
         },
+        required: ['alias', 'path', 'success', 'exitCode', 'stdout', 'stderr'],
       },
-      render: (_args, value) => text(
+      render: (_args: any, value: ListDirValue) => text(
         value.success
           ? `${value.alias}:${value.path}\n${value.stdout}`
           : `${value.alias}:${value.path} list failed\n${value.stderr || value.error || 'unknown error'}`,
       ),
     },
-    async execute(args, exec) {
+    async execute(args: { path: string; all?: boolean }, exec: any): Promise<ListDirValue> {
       const alias = linkedAlias(store, exec)
       const path = normalizeRemotePath(args.path)
       const flags = args.all === false ? '-l' : '-la'
@@ -164,31 +192,37 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
         ...(result.error === undefined ? {} : { error: result.error }),
       }
     },
-  })
+  }
 
-  const linkedUpload = defineTool({
+  const linkedUpload = {
     name: 'linked_ssh_upload',
     description: 'Upload a LOCAL file to the SSH server linked to THIS session. The current local Workspace stays local; this tool is the explicit LOCAL -> REMOTE bridge and does not require an alias.',
     parameters: {
-      localPath: { type: 'string', required: true, description: 'Absolute local file path on this machine.' },
-      remotePath: { type: 'string', required: true, description: 'Destination path on the currently linked remote server.' },
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        localPath: { type: 'string', description: 'Absolute local file path on this machine.' },
+        remotePath: { type: 'string', description: 'Destination path on the currently linked remote server.' },
+      },
+      required: ['localPath', 'remotePath'],
     },
     output: {
       schema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          ok: { type: 'boolean', required: true },
+          ok: { type: 'boolean' },
           transferredBytes: { type: 'integer' },
           files: { type: 'integer' },
           error: { type: 'string' },
         },
+        required: ['ok'],
       },
-      render: (_args, value: TransferValue) => text(value.ok
+      render: (_args: any, value: TransferValue) => text(value.ok
         ? `uploaded ${value.files ?? 1} file(s), ${value.transferredBytes ?? 0} bytes`
         : `upload failed: ${value.error ?? 'unknown error'}`),
     },
-    async execute(args, exec) {
+    async execute(args: { localPath: string; remotePath: string }, exec: any): Promise<TransferValue> {
       const alias = linkedAlias(store, exec)
       return await callNested(ctx, exec, 'ssh_upload', {
         alias,
@@ -196,30 +230,36 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
         remotePath: args.remotePath,
       }) as TransferValue
     },
-  })
+  }
 
-  const linkedDownload = defineTool({
+  const linkedDownload = {
     name: 'linked_ssh_download',
     description: 'Download a REMOTE file from the SSH server linked to THIS session to the local machine. No alias is required.',
     parameters: {
-      remotePath: { type: 'string', required: true, description: 'Remote file path on the currently linked server.' },
-      localPath: { type: 'string', required: true, description: 'Absolute destination path on the local machine.' },
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        remotePath: { type: 'string', description: 'Remote file path on the currently linked server.' },
+        localPath: { type: 'string', description: 'Absolute destination path on the local machine.' },
+      },
+      required: ['remotePath', 'localPath'],
     },
     output: {
       schema: {
         type: 'object',
         additionalProperties: false,
         properties: {
-          ok: { type: 'boolean', required: true },
+          ok: { type: 'boolean' },
           bytes: { type: 'integer' },
           error: { type: 'string' },
         },
+        required: ['ok'],
       },
-      render: (_args, value: TransferValue) => text(value.ok
+      render: (_args: any, value: TransferValue) => text(value.ok
         ? `downloaded ${value.bytes ?? 0} bytes`
         : `download failed: ${value.error ?? 'unknown error'}`),
     },
-    async execute(args, exec) {
+    async execute(args: { remotePath: string; localPath: string }, exec: any): Promise<TransferValue> {
       const alias = linkedAlias(store, exec)
       return await callNested(ctx, exec, 'ssh_download', {
         alias,
@@ -227,7 +267,7 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
         localPath: args.localPath,
       }) as TransferValue
     },
-  })
+  }
 
   ctx.effect(() => {
     const disposers = [linkedExec, linkedListDir, linkedUpload, linkedDownload]
