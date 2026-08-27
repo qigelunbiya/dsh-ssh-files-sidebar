@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import type { SshApi } from '@linxin666/dsh-ssh/src/client/api.ts'
-import type { PanelController } from '@linxin666/dsh-ssh/src/client/panel/controller.ts'
-import { tt } from '@linxin666/dsh-ssh/src/client/panel/helpers.ts'
-import { ClusterTab } from '@linxin666/dsh-ssh/src/client/panel/ClusterTab.tsx'
-import { HostsTab } from '@linxin666/dsh-ssh/src/client/panel/HostsTab.tsx'
-import { TransferTab } from '@linxin666/dsh-ssh/src/client/panel/TransferTab.tsx'
-import { TunnelsTab } from '@linxin666/dsh-ssh/src/client/panel/TunnelsTab.tsx'
-import css from '@linxin666/dsh-ssh/src/client/panel/panel.module.css'
+import {
+  ClusterTab,
+  HostsTab,
+  TransferTab,
+  TunnelsTab,
+  panelCss as css,
+  tt,
+  type PanelController,
+  type SshApi,
+} from './ssh-panel-bridge.js'
 import { LinkedTerminalTab } from './LinkedTerminalTab.tsx'
 import { OPEN_LINKED_TERMINAL_EVENT } from './linked-ssh-events.ts'
 
@@ -69,7 +71,7 @@ export function EmbeddedSshPanel({ controller, api }: EmbeddedSshPanelProps) {
     <div className={css.panel}>
       <div className={css.panelHeader}>
         <h2 className={css.panelTitle}>{tt('panel.title')}</h2>
-        <button type="button" className={css.iconButton} title={tt('common.close')} aria-label={tt('common.close')} onClick={() => { controller.close() }}>x</button>
+        <button type="button" className={css.iconButton} title="关闭" aria-label="关闭" onClick={() => { controller.close() }}>x</button>
       </div>
       <div className={css.tabBar} role="tablist">
         {TABS.map(tab => (
