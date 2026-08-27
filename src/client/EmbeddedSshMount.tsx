@@ -29,7 +29,7 @@ export function mountEmbeddedSshPanel(controller: PanelController, api: SshApi):
     if (column === undefined) return
     container = document.createElement('div')
     container.dataset.dshSshView = ''
-    container.className = css.view
+    container.className = css.view ?? ''
     column.appendChild(container)
     root = createRoot(container)
     root.render(<EmbeddedSshPanel controller={controller} api={api} />)
