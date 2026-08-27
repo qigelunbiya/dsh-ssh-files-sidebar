@@ -1,5 +1,6 @@
 import { createRoot, type Root } from 'react-dom/client'
 import { panelCss as css, type PanelController, type SshApi } from './ssh-panel-bridge.js'
+import { EmbeddedSshErrorBoundary } from './EmbeddedSshErrorBoundary.tsx'
 import { EmbeddedSshPanel } from './EmbeddedSshPanel.tsx'
 
 const PRIMARY_CONVERSATION_COLUMN_SELECTOR = '[data-pane="conversation"]'
@@ -42,7 +43,11 @@ export function mountEmbeddedSshPanel(controller: PanelController, api: SshApi):
     container.className = css.view ?? ''
     column.appendChild(container)
     root = createRoot(container)
-    root.render(<EmbeddedSshPanel controller={controller} api={api} />)
+    root.render(
+      <EmbeddedSshErrorBoundary controller={controller}>
+        <EmbeddedSshPanel controller={controller} api={api} />
+      </EmbeddedSshErrorBoundary>,
+    )
     return true
   }
 
