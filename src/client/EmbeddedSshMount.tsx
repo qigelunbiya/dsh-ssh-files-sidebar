@@ -1,7 +1,5 @@
 import { createRoot, type Root } from 'react-dom/client'
-import type { SshApi } from '@linxin666/dsh-ssh/src/client/api.ts'
-import type { PanelController } from '@linxin666/dsh-ssh/src/client/panel/controller.ts'
-import css from '@linxin666/dsh-ssh/src/client/panel/panel.module.css'
+import { panelCss as css, type PanelController, type SshApi } from './ssh-panel-bridge.js'
 import { EmbeddedSshPanel } from './EmbeddedSshPanel.tsx'
 
 const CONVERSATION_COLUMN_SELECTOR = '[data-pane="conversation"]'
