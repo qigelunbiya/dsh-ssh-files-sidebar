@@ -23,7 +23,14 @@ export interface ExecResult {
   error?: string
 }
 
+export interface LinkedSshBindingView {
+  alias: string
+  updatedAt: number
+  host?: SshHostSummary
+}
+
 const BASE = '/api/dsh-ssh'
+const LINKED_SSH_API = '/api/dsh-ssh-files-sidebar/linked-ssh'
 
 async function readJson<T>(response: Response): Promise<T> {
   const body = await response.json().catch(() => ({})) as { error?: string } & T
@@ -58,6 +65,22 @@ export async function listHosts(): Promise<SshHostSummary[]> {
   const response = await fetch(`${BASE}/hosts`)
   const body = await readJson<{ hosts: SshHostSummary[] }>(response)
   return body.hosts
+}
+
+export async function getLinkedSshBinding(sessionId: string): Promise<LinkedSshBindingView | null> {
+  const response = await fetch(`${LINKED_SSH_API}?${query({ sessionId })}`, { cache: 'no-store' })
+  const body = await readJson<{ binding: LinkedSshBindingView | null }>(response)
+  return body.binding
+}
+
+export async function saveLinkedSshBinding(sessionId: string, alias: string | null): Promise<LinkedSshBindingView | null> {
+  const response = await fetch(LINKED_SSH_API, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sessionId, alias }),
+  })
+  const body = await readJson<{ binding: LinkedSshBindingView | null }>(response)
+  return body.binding
 }
 
 export async function listRemoteDir(alias: string, path: string): Promise<RemoteDirEntry[]> {
