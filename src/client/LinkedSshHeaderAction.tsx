@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { listHosts, type SshHostSummary } from './api.ts'
 import { remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
-import { OPEN_LINKED_TERMINAL_EVENT } from './linked-ssh-events.ts'
+import { requestLinkedTerminal } from './linked-terminal-bridge.ts'
 import { setLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
 
 interface HeaderActionProps {
@@ -81,9 +81,7 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
 
   const openTerminal = (): void => {
     if (effectiveAlias === null) return
-    document.dispatchEvent(new CustomEvent(OPEN_LINKED_TERMINAL_EVENT, {
-      detail: { alias: effectiveAlias, autoConnect: true },
-    }))
+    requestLinkedTerminal(effectiveAlias, true)
     setOpen(false)
   }
 
