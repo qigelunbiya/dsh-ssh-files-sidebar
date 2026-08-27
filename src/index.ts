@@ -1,5 +1,6 @@
 import { apply as applySsh } from '@linxin666/dsh-ssh'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
+import { installLinkedSsh } from './linked-ssh.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
@@ -64,9 +65,18 @@ export function apply(ctx: any): void {
   // SSH agent tools, terminal websocket, tunnels and system-prompt guidance.
   applySsh(ctx, { enabled: true, announceToAgent: true })
 
+  // One shared view of ~/.dsh/dsh-ssh.json backs both Remote Workspace and the
+  // new Local Workspace + Linked SSH mode.
+  const hosts = new SharedDshSshHostTable()
+
+  // Session-scoped Linked SSH bindings live on the host as well as in the
+  // browser cache. This gives the model a deterministic LOCAL/REMOTE context:
+  // native tools stay local, ssh_* tools use the bound alias as the default
+  // remote target.
+  installLinkedSsh(ctx, hosts)
+
   // Remote workspace + native Read/Write/Edit/Glob/Grep/Bash shim, sharing the
   // dsh-ssh host store instead of maintaining a second SSH configuration.
-  const hosts = new SharedDshSshHostTable()
   const config = {
     hostKeyPolicy: 'accept-new',
     knownHostsPath: '',
