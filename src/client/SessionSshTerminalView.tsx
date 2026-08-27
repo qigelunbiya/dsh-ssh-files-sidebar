@@ -571,7 +571,7 @@ export function SessionSshTerminalView({ sessionId }: SessionSshTerminalViewProp
                   searchCaseSensitiveRef.current = !searchCaseSensitive
                   setSearchCaseSensitive(!searchCaseSensitive)
                 }} style={{ border: 0, borderRadius: 4, background: searchCaseSensitive ? '#315b8a' : 'transparent', color: '#e6edf3', padding: '4px 6px', cursor: 'pointer', fontSize: 11 }}>Aa</button>
-                <button type="button" title="上一个 (Shift+Enter / Shift+F3)" onClick={searchPrevious} style={searchButtonStyle}>↑</button>
+                <button type="button" title="上一个 (Shift+Enter / Shift+F3)" onClick={() => { searchPrevious() }} style={searchButtonStyle}>↑</button>
                 <button type="button" title="下一个 (Enter / F3)" onClick={() => { searchNext() }} style={searchButtonStyle}>↓</button>
                 <button type="button" title="关闭 (Esc)" onClick={closeSearch} style={searchButtonStyle}>×</button>
               </div>
