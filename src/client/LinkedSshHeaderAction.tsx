@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { listHosts, type SshHostSummary } from './api.ts'
 import { remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
-import { setLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
+import {
+  setLinkedSshAlias,
+  setWorkspaceSshAlias,
+  useExplicitLinkedSshAlias,
+} from './linked-ssh-store.ts'
 
 interface HeaderActionProps {
   sessionId: string
@@ -23,7 +27,7 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
   const { sessionId, useSessions } = props
   const cwd = useSessions(state => state.byId?.[sessionId]?.cwd as string | undefined)
   const remoteWorkspaceAlias = useMemo(() => remoteWorkspaceAliasFromCwd(cwd), [cwd])
-  const linkedAlias = useLinkedSshAlias(sessionId)
+  const linkedAlias = useExplicitLinkedSshAlias(sessionId)
   const effectiveAlias = remoteWorkspaceAlias ?? linkedAlias
 
   const [open, setOpen] = useState(false)
@@ -32,6 +36,15 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
   const [bindingBusy, setBindingBusy] = useState(false)
   const [error, setError] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
+
+  // A Remote Workspace already contains the authoritative SSH alias in its cwd.
+  // Publish that alias to the shared session target so the conversation-level
+  // SSH Terminal and the custom @ reference source follow the same server as
+  // SSH Files instead of waiting for a separate Linked SSH binding.
+  useEffect(() => {
+    setWorkspaceSshAlias(sessionId, remoteWorkspaceAlias)
+    return () => { setWorkspaceSshAlias(sessionId, null) }
+  }, [sessionId, remoteWorkspaceAlias])
 
   useEffect(() => {
     if (!open) return
@@ -116,8 +129,8 @@ export function LinkedSshHeaderAction(props: HeaderActionProps) {
         >
           <div style={{ padding: '5px 7px 8px', fontSize: 12, opacity: .68 }}>
             {remoteWorkspaceAlias
-              ? '这是远程 SSH 工作区，服务器由工作区本身决定。'
-              : 'Workspace 保持在本机；普通 Read / Write / Bash 继续操作本机。这里是当前会话唯一的 SSH 目标，SSH Files、SSH 终端和 ssh_* 都会跟随它。'}
+              ? '这是远程 SSH 工作区，服务器由工作区本身决定；SSH Files、SSH 终端和 @ 文件引用都会自动跟随该服务器。'
+              : 'Workspace 保持在本机；普通 Read / Write / Bash 继续操作本机。这里是当前会话唯一的 SSH 目标，SSH Files、SSH 终端和 @ 文件引用都会跟随它。'}
           </div>
 
           {effectiveAlias ? (
