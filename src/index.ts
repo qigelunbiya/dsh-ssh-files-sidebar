@@ -3,6 +3,7 @@ import { apply as applyRemoteWorkspace } from 'dsh-rw'
 import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
 import { installLinkedSshVisionTool } from './linked-ssh-vision.ts'
+import { installLinkedSshOcrTool } from './linked-ssh-ocr.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
@@ -86,6 +87,12 @@ export function apply(ctx: any): void {
   // image-capable model with hard cancellation/timeout boundaries. No local
   // Workspace copy is created simply to inspect a remote screenshot.
   installLinkedSshVisionTool(ctx, linkedStore)
+
+  // Local OCR fallback/primary path for text-only models. It streams the same
+  // remote bytes straight into Windows Media OCR (or macOS VisionKit) and
+  // returns plain text to the Agent. It needs no visual-model API key and does
+  // not materialize the image into the local Workspace or temp directory.
+  installLinkedSshOcrTool(ctx, linkedStore)
 
   // Sent SSH references intentionally reuse Harness' native @file display
   // grammar, e.g. @ssh:131:/apps/web/test.txt. Teach the Agent that the token
