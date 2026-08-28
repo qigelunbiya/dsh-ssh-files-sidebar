@@ -2,6 +2,7 @@ import { apply as applySsh } from '@linxin666/dsh-ssh'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
 import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
+import { installLinkedSshVisionTool } from './linked-ssh-vision.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
@@ -79,6 +80,12 @@ export function apply(ctx: any): void {
   // time, so the model cannot accidentally call ssh_exec without an alias or
   // drift away from SSH Files / SSH Terminal.
   installLinkedSshAgentTools(ctx, linkedStore)
+
+  // Direct remote image inspection. Server bytes are streamed by SFTP into
+  // memory, validated by Harness' AttachmentStore, and sent to a registered
+  // image-capable model with hard cancellation/timeout boundaries. No local
+  // Workspace copy is created simply to inspect a remote screenshot.
+  installLinkedSshVisionTool(ctx, linkedStore)
 
   // Sent SSH references intentionally reuse Harness' native @file display
   // grammar, e.g. @ssh:131:/apps/web/test.txt. Teach the Agent that the token
