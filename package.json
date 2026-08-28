@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.5.15",
+  "version": "0.6.1",
   "description": "Integrated DSH Remote SSH workspace, Linked SSH, SSH operations UI and VSCode-like remote file explorer/editor.",
   "type": "module",
   "license": "MIT",
