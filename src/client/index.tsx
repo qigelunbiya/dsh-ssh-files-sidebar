@@ -1,5 +1,6 @@
 import { apply as applySshClient } from './embedded-ssh-client.js'
 import { LinkedSshHeaderAction } from './LinkedSshHeaderAction.tsx'
+import { registerLinkedSshReferenceSource } from './LinkedSshReferenceSource.ts'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
 import { SessionSshTerminalView } from './SessionSshTerminalView.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
@@ -201,13 +202,14 @@ export const inject = [
   'connection',
   'remote',
   'settingsScope',
+  'inputTriggers',
 ]
 
 export function apply(ctx: any): void {
   // Original dsh-ssh browser surfaces remain available from the left SSH entry
   // for host management, transfer, tunnels and ad-hoc administration. The
   // session-bound terminal below is intentionally a different surface: it can
-  // never select a host independently from Linked SSH.
+  // never select a host independently from the session's effective SSH target.
   applySshClient(ctx)
 
   // Replace the raw native directory picker entry with an explicit Local /
@@ -215,12 +217,17 @@ export function apply(ctx: any): void {
   // by this same package's host half.
   registerWorkspaceDirectoryFlow(ctx)
 
+  // DSH's built-in @ source only resolves the local Workspace. Register our
+  // parallel source so a session with either Remote Workspace or Linked SSH can
+  // browse/search the same server shown by SSH Files and insert a remote ref.
+  registerLinkedSshReferenceSource(ctx)
+
   ctx.effect(installSshFilesContextMenuPositionFix, 'dsh-ssh-files-sidebar: context menu viewport fix')
   ctx.effect(installSessionTerminalBrowserShortcutCompatibility, 'dsh-ssh-files-sidebar: session terminal browser shortcut compatibility')
 
   // Linked SSH is session-scoped and additive: a local Workspace stays local,
-  // while the session can independently point at one configured SSH host.
-  // This selector is the single source of truth for Agent context, SSH Files
+  // while a Remote Workspace contributes its own authoritative SSH alias.
+  // This selector synchronizes the effective target used by @ refs, SSH Files
   // and the session SSH terminal.
   ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
     name: 'conversation.session.header.actions',
@@ -229,9 +236,8 @@ export function apply(ctx: any): void {
     label: 'SSH',
   }, LinkedSshHeaderAction))
 
-  // Native conversation tab beside “对话 / 轨迹”. It is deliberately bound to
-  // the current session's Linked SSH alias and exposes no host selector of its
-  // own, preventing terminal/SSH-Files/Agent target drift.
+  // Native conversation tab beside “对话 / 轨迹”. It follows the session's
+  // effective SSH target and exposes no independent host selector.
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'ssh-terminal',
