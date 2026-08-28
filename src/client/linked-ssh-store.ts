@@ -5,6 +5,7 @@ const STORAGE_PREFIX = 'dsh-ssh-files-sidebar:linked-ssh:v1:'
 const EVENT_NAME = 'dsh-ssh-files-sidebar:linked-ssh-changed'
 const hydrated = new Set<string>()
 const hydrating = new Map<string, Promise<void>>()
+const workspaceAliases = new Map<string, string>()
 
 function storageKey(sessionId: string): string {
   return `${STORAGE_PREFIX}${sessionId}`
@@ -16,7 +17,12 @@ function normalizeAlias(value: unknown): string | null {
   return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(alias) ? alias : null
 }
 
-/** Read the browser cache for one DSH session. Host persistence is authoritative. */
+function publish(sessionId: string): void {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { sessionId } }))
+}
+
+/** Read the explicit Linked SSH browser cache for one DSH session. */
 export function getLinkedSshAlias(sessionId?: string): string | null {
   if (!sessionId || typeof window === 'undefined') return null
   try {
@@ -24,6 +30,30 @@ export function getLinkedSshAlias(sessionId?: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Record the SSH alias implied by a dsh-rw Remote Workspace.
+ * This state is intentionally page-local: the Workspace itself remains the
+ * persistent source of truth, while consumers such as SSH Terminal and @ refs
+ * get one unified effective target without polluting the explicit Linked SSH
+ * binding stored for local workspaces.
+ */
+export function setWorkspaceSshAlias(sessionId: string, alias: string | null): void {
+  if (!sessionId || typeof window === 'undefined') return
+  const normalized = alias === null ? null : normalizeAlias(alias)
+  if (alias !== null && normalized === null) return
+  const current = workspaceAliases.get(sessionId) ?? null
+  if (current === normalized) return
+  if (normalized === null) workspaceAliases.delete(sessionId)
+  else workspaceAliases.set(sessionId, normalized)
+  publish(sessionId)
+}
+
+/** Workspace SSH wins; otherwise fall back to the explicit Linked SSH binding. */
+export function getEffectiveSshAlias(sessionId?: string): string | null {
+  if (!sessionId) return null
+  return workspaceAliases.get(sessionId) ?? getLinkedSshAlias(sessionId)
 }
 
 function publishLocal(sessionId: string, alias: string | null): void {
@@ -35,7 +65,7 @@ function publishLocal(sessionId: string, alias: string | null): void {
     // Hardened browser contexts may reject storage; the same-page event still
     // lets mounted consumers re-read whatever storage state is available.
   }
-  window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: { sessionId } }))
+  publish(sessionId)
 }
 
 /**
@@ -106,15 +136,27 @@ function subscribe(sessionId: string, listener: () => void): () => void {
   }
 }
 
-/** Reactive session binding used by the header action and SSH Files tab. */
-export function useLinkedSshAlias(sessionId: string): string | null {
+function useAliasSnapshot(sessionId: string, effective: boolean): string | null {
   useEffect(() => {
     void hydrateLinkedSshAlias(sessionId)
   }, [sessionId])
 
   return useSyncExternalStore(
     listener => subscribe(sessionId, listener),
-    () => getLinkedSshAlias(sessionId),
+    () => effective ? getEffectiveSshAlias(sessionId) : getLinkedSshAlias(sessionId),
     () => null,
   )
+}
+
+/** Explicit user-selected Linked SSH only, used by the header selector itself. */
+export function useExplicitLinkedSshAlias(sessionId: string): string | null {
+  return useAliasSnapshot(sessionId, false)
+}
+
+/**
+ * Reactive effective SSH target used by SSH Files / SSH Terminal.
+ * A Remote Workspace alias takes priority over an explicit local-workspace link.
+ */
+export function useLinkedSshAlias(sessionId: string): string | null {
+  return useAliasSnapshot(sessionId, true)
 }
