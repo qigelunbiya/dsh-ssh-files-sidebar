@@ -1,7 +1,4 @@
 import { basename, extname } from 'node:path'
-import { SshEngine } from '@linxin666/dsh-ssh/src/engine.ts'
-import { withClient } from '@linxin666/dsh-ssh/src/engine/connection-pool.ts'
-import { HostStore } from '@linxin666/dsh-ssh/src/store.ts'
 import type { LinkedSshBindingStore } from './linked-ssh.ts'
 
 type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif'
@@ -22,6 +19,12 @@ interface RemoteVisionValue {
   height: number
   bytes: number
   description: string
+}
+
+interface SshInternals {
+  SshEngine: new (store: any) => any
+  HostStore: new () => any
+  withClient: (engine: any, alias: string, fn: (client: any) => Promise<any>) => Promise<any>
 }
 
 const IMAGE_MEDIA_TYPES: Readonly<Record<string, ImageMediaType>> = {
@@ -47,9 +50,40 @@ const MAX_VISION_TIMEOUT_MS = 60_000
 const TOOL_TIMEOUT_MS = 70_000
 const ROUTE_CACHE_TTL_MS = 5 * 60_000
 const routeCache = new Map<string, { at: number; route: VisionRoute }>()
+let sshInternalsPromise: Promise<SshInternals> | undefined
 
 function text(value: string) {
   return [{ type: 'text' as const, text: value }]
+}
+
+/**
+ * @linxin666/dsh-ssh intentionally exports its src/* surface, but importing
+ * those TS files statically makes this plugin's strict tsc walk and typecheck
+ * the dependency's source tree. Resolve the declared runtime subpaths lazily
+ * instead: DSH is launched through tsx/esm, while this package still owns no
+ * second SSH credential format or ssh2 implementation.
+ */
+async function loadSshInternals(): Promise<SshInternals> {
+  if (sshInternalsPromise !== undefined) return await sshInternalsPromise
+  sshInternalsPromise = (async () => {
+    const engineSpec = '@linxin666/dsh-ssh/src/engine.ts'
+    const poolSpec = '@linxin666/dsh-ssh/src/engine/connection-pool.ts'
+    const storeSpec = '@linxin666/dsh-ssh/src/store.ts'
+    const [engineModule, poolModule, storeModule] = await Promise.all([
+      import(engineSpec),
+      import(poolSpec),
+      import(storeSpec),
+    ]) as any[]
+    if (typeof engineModule?.SshEngine !== 'function' || typeof storeModule?.HostStore !== 'function' || typeof poolModule?.withClient !== 'function') {
+      throw new Error('@linxin666/dsh-ssh 当前版本没有暴露远程图片读取所需的 SSH engine 接口')
+    }
+    return {
+      SshEngine: engineModule.SshEngine,
+      HostStore: storeModule.HostStore,
+      withClient: poolModule.withClient,
+    }
+  })()
+  return await sshInternalsPromise
 }
 
 function agentSessionId(exec: any): string {
@@ -115,13 +149,14 @@ function abortable<T>(pending: Promise<T>, signal: AbortSignal, label: string): 
  * commit is the Harness-native, content-addressed model transport boundary.
  */
 async function readRemoteBytes(
-  engine: SshEngine,
+  internals: SshInternals,
+  engine: any,
   alias: string,
   remotePath: string,
   maxBytes: number,
   signal: AbortSignal,
 ): Promise<Uint8Array> {
-  return await withClient(engine, alias, async (client: any) => {
+  return await internals.withClient(engine, alias, async (client: any) => {
     return await new Promise<Uint8Array>((resolve, reject) => {
       let settled = false
       let sftp: any
@@ -238,10 +273,11 @@ async function resolveVisionRoute(llm: any, exec: any, signal: AbortSignal): Pro
         '解析当前模型能力',
       )
       if (Array.isArray(info?.inputModalities) && info.inputModalities.includes('image')) {
-        const route = {
+        const effort = lowCostReasoning(info)
+        const route: VisionRoute = {
           provider: current.provider,
           model: current.model,
-          ...(lowCostReasoning(info) === undefined ? {} : { reasoningEffort: lowCostReasoning(info) }),
+          ...(effort === undefined ? {} : { reasoningEffort: effort }),
         }
         routeCache.set(key, { at: Date.now(), route })
         return route
@@ -320,7 +356,6 @@ async function describeWithVisionModel(
     messages,
     maxTokens: 4096,
     signal,
-    purpose: 'auxiliary',
   }
   if (route.reasoningEffort !== undefined) request.reasoningEffort = route.reasoningEffort
 
@@ -359,7 +394,13 @@ async function describeWithVisionModel(
  * involved, so server images never need a workspace copy just to be inspected.
  */
 export function installLinkedSshVisionTool(ctx: any, store: LinkedSshBindingStore): void {
-  const visionSsh = new SshEngine(new HostStore())
+  let visionSsh: any
+  let internals: SshInternals | undefined
+  const getVisionSsh = async (): Promise<{ internals: SshInternals; engine: any }> => {
+    if (internals === undefined) internals = await loadSshInternals()
+    if (visionSsh === undefined) visionSsh = new internals.SshEngine(new internals.HostStore())
+    return { internals, engine: visionSsh }
+  }
 
   const tool = {
     name: 'linked_ssh_read_image',
@@ -420,8 +461,9 @@ export function installLinkedSshVisionTool(ctx: any, store: LinkedSshBindingStor
         ? 20 * 1024 * 1024
         : Math.min(limits.maxImageBytes, limits.maxMessageImageBytes)
 
+      const ssh = await getVisionSsh()
       const readSignal = combineSignal(exec?.signal, REMOTE_READ_TIMEOUT_MS)
-      const bytes = await readRemoteBytes(visionSsh, alias, remotePath, byteCap, readSignal)
+      const bytes = await readRemoteBytes(ssh.internals, ssh.engine, alias, remotePath, byteCap, readSignal)
       let ref: any
       try {
         ref = await abortable(
@@ -467,7 +509,7 @@ export function installLinkedSshVisionTool(ctx: any, store: LinkedSshBindingStor
     const disposeTool = ctx.tools.register(tool)
     return () => {
       disposeTool()
-      visionSsh.dispose()
+      try { visionSsh?.dispose?.() } catch { /* already disposed */ }
     }
   }, 'dsh-ssh-files-sidebar: direct Linked SSH vision')
 
