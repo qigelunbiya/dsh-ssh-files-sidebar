@@ -104,7 +104,7 @@ export function apply(ctx: any): void {
     text: () => [
       '## SSH reference syntax',
       'A token shaped like @ssh:<alias>:/absolute/path (or @"ssh:<alias>:/path with spaces") is an explicit SSH file/folder reference created by the UI.',
-      'Treat it as a path on SSH <alias>, not as a local Workspace path. Use Linked SSH / ssh_* remote operations for it; never pass it to local Read/Glob/Pwsh/Bash by mistake.',
+      'Treat it as a path on SSH <alias>, not as a local Workspace path. Use Linked SSH / ssh_* remote operations for it; never pass it to local `read`, `glob`, `pwsh`, or `bash` by mistake. Tool names are case-sensitive and must be used exactly as advertised.',
     ].join('\n'),
   }), 'dsh-ssh-files-sidebar: SSH reference syntax')
 
