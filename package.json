@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Integrated DSH Remote SSH workspace, Linked SSH, SSH operations UI and VSCode-like remote file explorer/editor.",
   "type": "module",
   "license": "MIT",
@@ -81,6 +81,9 @@
     "@codemirror/search": "^6.7.1",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.38.5"
+  },
+  "optionalDependencies": {
+    "@napi-rs/system-ocr": "^1.1.0"
   },
   "peerDependencies": {
     "dsh-better-sidebar": "^0.16.1",
