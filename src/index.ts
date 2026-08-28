@@ -80,6 +80,19 @@ export function apply(ctx: any): void {
   // drift away from SSH Files / SSH Terminal.
   installLinkedSshAgentTools(ctx, linkedStore)
 
+  // Sent SSH references intentionally reuse Harness' native @file display
+  // grammar, e.g. @ssh:131:/apps/web/test.txt. Teach the Agent that the token
+  // is remote data even though the user bubble renders it as a normal file chip.
+  ctx.effect(() => ctx.systemPrompt.section({
+    name: 'plugin:dsh-ssh-reference-syntax',
+    order: 152,
+    text: () => [
+      '## SSH reference syntax',
+      'A token shaped like @ssh:<alias>:/absolute/path (or @"ssh:<alias>:/path with spaces") is an explicit SSH file/folder reference created by the UI.',
+      'Treat it as a path on SSH <alias>, not as a local Workspace path. Use Linked SSH / ssh_* remote operations for it; never pass it to local Read/Glob/Pwsh/Bash by mistake.',
+    ].join('\n'),
+  }), 'dsh-ssh-files-sidebar: SSH reference syntax')
+
   // Remote workspace + native Read/Write/Edit/Glob/Grep/Bash shim, sharing the
   // dsh-ssh host store instead of maintaining a second SSH configuration.
   const config = {
