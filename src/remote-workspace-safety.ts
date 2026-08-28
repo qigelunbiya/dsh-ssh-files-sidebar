@@ -123,7 +123,7 @@ function remotePrompt(meta: RwPlaceholderMeta): string {
     '## Remote workspace (session-safe)',
     `This conversation is remote-backed: ${meta.user}@${meta.host}:${meta.port} (alias: ${meta.alias}), workspace ${meta.remotePath}.`,
     'The conversation cwd is a dsh-rw placeholder; the remote filesystem is the source of truth.',
-    'Use the normal Read/Write/Edit/Glob/Grep/Bash/Pwsh-style tools exactly as you would in a local workspace; dsh-rw shim routing maps native file/shell calls for this cwd to this remote workspace.',
+    'Use the normal Read/Write/Edit/Glob/Grep/Bash tools exactly as you would in a local workspace; dsh-rw shim routing maps those native file/shell calls for this cwd to this remote workspace. Do not use the Windows-local Pwsh tool for remote-shell work.',
     'Legacy rw_* tools are intentionally hidden/blocked by dsh-ssh-files-sidebar because dsh-rw 0.4.x stores their target in one process-global session and can therefore drift across conversations. Do not call rw_* tools.',
   ].join('\n')
 }
