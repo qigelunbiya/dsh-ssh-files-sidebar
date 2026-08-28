@@ -4,6 +4,7 @@ import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
 import { installLinkedSshVisionTool } from './linked-ssh-vision.ts'
 import { installLinkedSshOcrTool } from './linked-ssh-ocr.ts'
+import { EphemeralRwSession, installRemoteWorkspaceSessionSafety } from './remote-workspace-safety.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
@@ -107,6 +108,13 @@ export function apply(ctx: any): void {
     ].join('\n'),
   }), 'dsh-ssh-files-sidebar: SSH reference syntax')
 
+  // dsh-rw 0.4.x owns one process-global persisted Session. In a multi-session
+  // Harness that can leak the last Remote Workspace into an unrelated local
+  // conversation. Keep the picker/status state process-local and rewrite the
+  // model-facing dsh-rw surface from each conversation's actual cwd instead.
+  const rwSession = new EphemeralRwSession()
+  installRemoteWorkspaceSessionSafety(ctx)
+
   // Remote workspace + native Read/Write/Edit/Glob/Grep/Bash shim, sharing the
   // dsh-ssh host store instead of maintaining a second SSH configuration.
   const config = {
@@ -125,8 +133,14 @@ export function apply(ctx: any): void {
   // optional directoryPicker service during apply(). The web bundle mounts
   // directory-picker-auto as a separate loader row, so activation order must
   // not decide whether this button works for the rest of the process lifetime.
+  //
+  // The explicit ephemeral session is equally important: dsh-rw's default
+  // Session reads/writes ~/.dsh/dsh-rw-session.json globally. Remote-native
+  // routing is already cwd/placeholder-driven, so persisting that mutable
+  // selection only creates cross-conversation ambiguity and is unnecessary.
   applyRemoteWorkspace(ctx, config as any, {
     hosts,
+    session: rwSession,
     pickDirectory: () => pickLocalDirectory(ctx),
   } as any)
 }
