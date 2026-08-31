@@ -1,9 +1,11 @@
+import { useEffect } from 'react'
 import { apply as applySshClient } from './embedded-ssh-client.js'
 import { LinkedSshHeaderAction } from './LinkedSshHeaderAction.tsx'
 import { registerLinkedSshReferenceSource } from './LinkedSshReferenceSource.ts'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
 import { SessionSshTerminalView } from './SessionSshTerminalView.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
+import { installCrossFilesDragAndDrop } from './cross-files-dnd.ts'
 import { getLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
 
 function linkedAliasPlaceholder(alias: string): string {
@@ -18,6 +20,22 @@ function RemoteFilesForScope({ scope }: { scope: any }) {
   const remoteAlias = remoteWorkspaceAliasFromCwd(scope?.cwd)
   const linkedAlias = useLinkedSshAlias(sessionId)
   const effectiveAlias = remoteAlias ?? linkedAlias
+  const localCwd = remoteAlias === null && linkedAlias !== null && typeof scope?.cwd === 'string' && scope.cwd !== ''
+    ? scope.cwd
+    : null
+
+  // Cross-pane drag/drop is intentionally only enabled for the additive mode:
+  // a REAL local Workspace plus a Linked SSH target. In a dsh-rw Remote
+  // Workspace the built-in Files pane is itself remote-backed, so treating it
+  // as the local side would be misleading and could duplicate the same server.
+  useEffect(() => {
+    if (effectiveAlias === null || localCwd === null) return
+    return installCrossFilesDragAndDrop({
+      sessionId,
+      localCwd,
+      alias: effectiveAlias,
+    })
+  }, [sessionId, localCwd, effectiveAlias])
 
   if (effectiveAlias === null) {
     return (
@@ -28,10 +46,17 @@ function RemoteFilesForScope({ scope }: { scope: any }) {
   }
 
   return (
-    <RemoteFilesTab
-      sessionId={sessionId}
-      workspaceCwd={remoteAlias !== null ? scope?.cwd : linkedAliasPlaceholder(effectiveAlias)}
-    />
+    <div
+      data-dsh-ssh-files-root="true"
+      data-session-id={sessionId}
+      data-ssh-alias={effectiveAlias}
+      style={{ height: '100%', minHeight: 0, position: 'relative' }}
+    >
+      <RemoteFilesTab
+        sessionId={sessionId}
+        workspaceCwd={remoteAlias !== null ? scope?.cwd : linkedAliasPlaceholder(effectiveAlias)}
+      />
+    </div>
   )
 }
 
