@@ -20,14 +20,15 @@ function RemoteFilesForScope({ scope }: { scope: any }) {
   const remoteAlias = remoteWorkspaceAliasFromCwd(scope?.cwd)
   const linkedAlias = useLinkedSshAlias(sessionId)
   const effectiveAlias = remoteAlias ?? linkedAlias
-  const localCwd = remoteAlias === null && linkedAlias !== null && typeof scope?.cwd === 'string' && scope.cwd !== ''
-    ? scope.cwd
-    : null
+  const localCwd = typeof scope?.cwd === 'string' && scope.cwd !== '' ? scope.cwd : null
 
-  // Cross-pane drag/drop is intentionally only enabled for the additive mode:
-  // a REAL local Workspace plus a Linked SSH target. In a dsh-rw Remote
-  // Workspace the built-in Files pane is itself remote-backed, so treating it
-  // as the local side would be misleading and could duplicate the same server.
+  // Cross-pane drag/drop follows the two panes that are actually visible in
+  // better-sidebar. In a normal local + Linked SSH session, Files is the real
+  // local Workspace. In a dsh-rw Remote Workspace, Files points at the local
+  // placeholder directory that better-sidebar is visibly rendering. Either
+  // way, the user's drag must work between the visible Files and SSH Files
+  // panes instead of being silently disabled just because the cwd is a remote
+  // placeholder.
   useEffect(() => {
     if (effectiveAlias === null || localCwd === null) return
     return installCrossFilesDragAndDrop({
