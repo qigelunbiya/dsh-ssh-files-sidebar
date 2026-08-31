@@ -1,4 +1,5 @@
 import type { LinkedSshBindingStore } from './linked-ssh.ts'
+import { effectiveSessionSshAlias, requireEffectiveSessionSshAlias } from './session-ssh-target.ts'
 
 interface ExecValue {
   success: boolean
@@ -32,21 +33,8 @@ function text(value: string) {
   return [{ type: 'text' as const, text: value }]
 }
 
-function agentSessionId(exec: any): string {
-  const id = exec?.agent?.id
-  if (typeof id !== 'string' || id === '') {
-    throw new Error('当前工具调用没有可识别的 DSH session，无法解析 Linked SSH 目标。')
-  }
-  return id
-}
-
 function linkedAlias(store: LinkedSshBindingStore, exec: any): string {
-  const sessionId = agentSessionId(exec)
-  const binding = store.get(sessionId)
-  if (binding === undefined) {
-    throw new Error('当前会话没有绑定 Linked SSH。请先在会话顶部“标准模式”右侧选择服务器。')
-  }
-  return binding.alias
+  return requireEffectiveSessionSshAlias(store, exec)
 }
 
 async function callNested(ctx: any, exec: any, name: string, args: Record<string, unknown>): Promise<any> {
@@ -107,7 +95,11 @@ const EXEC_OUTPUT_SCHEMA = {
 /**
  * Register model-facing tools that infer the SSH alias from the current DSH
  * session. They intentionally remove the alias parameter from the model's job:
- * the header Linked SSH selector is the only source of truth.
+ * the conversation's effective SSH target is the only source of truth.
+ *
+ * For a normal local Workspace that target comes from the header Linked SSH
+ * binding. For a dsh-rw Remote Workspace it comes from that conversation cwd's
+ * .dsh-rw-meta.json, matching the UI's remoteAlias ?? linkedAlias precedence.
  *
  * These are raw ToolDefinition objects rather than defineTool() wrappers. That
  * keeps this integration on the ToolRuntime service already supplied by DSH and
@@ -117,12 +109,12 @@ const EXEC_OUTPUT_SCHEMA = {
 export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStore): void {
   const linkedExec = {
     name: 'linked_ssh_exec',
-    description: 'Execute a command on the SSH server linked to THIS session. No host alias is required or allowed. Use this for remote/server commands, logs, services, deployment inspection, and remote filesystem operations when the session header shows a Linked SSH target.',
+    description: 'Execute a command on the one SSH server bound to THIS conversation. No host alias is required or allowed. Use this for remote/server commands, process inspection, logs, services, deployment inspection, and remote filesystem operations.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        command: { type: 'string', description: 'Shell command to run on the currently linked remote server.' },
+        command: { type: 'string', description: 'Shell command to run on the current conversation SSH server.' },
         timeoutMs: { type: 'integer', description: 'Optional timeout in milliseconds.' },
       },
       required: ['command'],
@@ -143,7 +135,7 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
 
   const linkedListDir = {
     name: 'linked_ssh_list_dir',
-    description: 'List a directory on the SSH server linked to THIS session. Prefer this instead of local Glob/Pwsh when the user asks about a remote/server directory or a path visible in SSH Files. If the user says a common Linux top-level directory such as apps/etc/var without a leading slash, it is interpreted as /apps, /etc, /var, etc.',
+    description: 'List a directory on the one SSH server bound to THIS conversation. Prefer this instead of local Glob/Pwsh when the user asks about a remote/server directory or a path visible in SSH Files. If the user says a common Linux top-level directory such as apps/etc/var without a leading slash, it is interpreted as /apps, /etc, /var, etc.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -196,13 +188,13 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
 
   const linkedUpload = {
     name: 'linked_ssh_upload',
-    description: 'Upload a LOCAL file to the SSH server linked to THIS session. The current local Workspace stays local; this tool is the explicit LOCAL -> REMOTE bridge and does not require an alias.',
+    description: 'Upload a LOCAL file to the one SSH server bound to THIS conversation. The current local Workspace stays local; this tool is the explicit LOCAL -> REMOTE bridge and does not accept an alias.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
         localPath: { type: 'string', description: 'Absolute local file path on this machine.' },
-        remotePath: { type: 'string', description: 'Destination path on the currently linked remote server.' },
+        remotePath: { type: 'string', description: 'Destination path on the current conversation SSH server.' },
       },
       required: ['localPath', 'remotePath'],
     },
@@ -234,12 +226,12 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
 
   const linkedDownload = {
     name: 'linked_ssh_download',
-    description: 'Download a REMOTE file from the SSH server linked to THIS session to the local machine. No alias is required.',
+    description: 'Download a REMOTE file from the one SSH server bound to THIS conversation to the local machine. No alias is required or allowed.',
     parameters: {
       type: 'object',
       additionalProperties: false,
       properties: {
-        remotePath: { type: 'string', description: 'Remote file path on the currently linked server.' },
+        remotePath: { type: 'string', description: 'Remote file path on the current conversation SSH server.' },
         localPath: { type: 'string', description: 'Absolute destination path on the local machine.' },
       },
       required: ['remotePath', 'localPath'],
@@ -279,13 +271,13 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
     name: 'plugin:dsh-ssh-linked-tools',
     order: 152,
     text: (context: any) => {
-      const sessionId = typeof context?.agent?.id === 'string' ? context.agent.id : ''
-      if (sessionId === '' || store.get(sessionId) === undefined) return ''
+      const alias = effectiveSessionSshAlias(store, context)
+      if (alias === null) return ''
       return [
-        '## Linked SSH routing priority',
-        'This session has both a LOCAL Workspace and a session-bound REMOTE SSH target.',
-        'For local source-code/workspace requests, use the normal local tools (read/write/edit/glob/grep/bash/pwsh).',
-        'For remote/server requests, prefer linked_ssh_exec, linked_ssh_list_dir, linked_ssh_upload and linked_ssh_download. These tools automatically use the server selected in the session header, so NEVER invent or omit an SSH alias.',
+        '## Session-bound SSH routing priority',
+        `This conversation has exactly one REMOTE SSH target: "${alias}".`,
+        'For local source-code/workspace requests, use the normal local tools when the Workspace is local.',
+        `For remote/server requests, use linked_ssh_exec, linked_ssh_list_dir, linked_ssh_upload and linked_ssh_download. They automatically use "${alias}"; never enumerate configured hosts and never choose another alias.`,
         'If the user asks about a Linux server path or a directory visible in SSH Files (for example “看看 apps 目录”, “/apps 下有什么”, “查看 /var/log”, “服务器日志”), treat it as REMOTE. Do NOT try local Glob/Pwsh first.',
         'Example: “看看 apps 目录下有什么文件” -> linked_ssh_list_dir({ path: "/apps" }).',
       ].join('\n')
