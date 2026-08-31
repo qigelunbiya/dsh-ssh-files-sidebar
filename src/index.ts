@@ -5,6 +5,7 @@ import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
 import { installLinkedSshVisionTool } from './linked-ssh-vision.ts'
 import { installLinkedSshOcrTool } from './linked-ssh-ocr.ts'
 import { EphemeralRwSession, installRemoteWorkspaceSessionSafety } from './remote-workspace-safety.ts'
+import { installSessionSshTargetSafety } from './session-ssh-safety.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
@@ -65,9 +66,11 @@ async function pickLocalDirectory(ctx: any): Promise<string | null> {
  * SAME ~/.dsh/dsh-ssh.json file, so SSH credentials are configured only once.
  */
 export function apply(ctx: any): void {
-  // Original dsh-ssh host capabilities: host manager backend, /api/dsh-ssh/*,
-  // SSH agent tools, terminal websocket, tunnels and system-prompt guidance.
-  applySsh(ctx, { enabled: true, announceToAgent: true })
+  // Keep the original dsh-ssh backend/UI/raw tools registered for internal
+  // delegation, terminal, tunnels and file APIs, but do not let its standalone
+  // multi-host prompt teach the Agent to enumerate every configured server.
+  // This integrated plugin owns Agent routing and enforces one target/session.
+  applySsh(ctx, { enabled: true, announceToAgent: false })
 
   // One shared view of ~/.dsh/dsh-ssh.json backs both Remote Workspace and the
   // new Local Workspace + Linked SSH mode.
@@ -77,10 +80,17 @@ export function apply(ctx: any): void {
   // browser cache. This gives the model a deterministic LOCAL/REMOTE context.
   const linkedStore = installLinkedSsh(ctx, hosts)
 
-  // Session-bound model tools remove the alias parameter entirely. The server
-  // selected in the conversation header is injected by the plugin at execution
-  // time, so the model cannot accidentally call ssh_exec without an alias or
-  // drift away from SSH Files / SSH Terminal.
+  // Hard invariant: the Agent never gets a generic multi-host SSH surface.
+  // Raw ssh_* tools remain available internally to the session-bound wrappers,
+  // but are hidden from model assembly. Stale/raw calls are blocked unless the
+  // requested alias exactly equals the current conversation target. ssh_list
+  // and other host enumeration/switching calls are therefore impossible once
+  // a session target is selected, and impossible without a selected target too.
+  installSessionSshTargetSafety(ctx, linkedStore)
+
+  // Session-bound model tools remove the alias parameter entirely. The target
+  // comes from Remote Workspace metadata first, otherwise the header Linked SSH
+  // binding, exactly matching SSH Files / SSH Terminal UI precedence.
   installLinkedSshAgentTools(ctx, linkedStore)
 
   // Direct remote image inspection. Server bytes are streamed by SFTP into
@@ -104,7 +114,7 @@ export function apply(ctx: any): void {
     text: () => [
       '## SSH reference syntax',
       'A token shaped like @ssh:<alias>:/absolute/path (or @"ssh:<alias>:/path with spaces") is an explicit SSH file/folder reference created by the UI.',
-      'Treat it as a path on SSH <alias>, not as a local Workspace path. Use Linked SSH / ssh_* remote operations for it; never pass it to local `read`, `glob`, `pwsh`, or `bash` by mistake. Tool names are case-sensitive and must be used exactly as advertised.',
+      'Treat it as a path on the current conversation SSH target, not as a local Workspace path. Use the advertised session-bound linked_ssh_* operations; never enumerate/switch hosts and never pass the remote path to local `read`, `glob`, `pwsh`, or `bash` by mistake.',
     ].join('\n'),
   }), 'dsh-ssh-files-sidebar: SSH reference syntax')
 
