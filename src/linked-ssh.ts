@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSy
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { remoteWorkspaceFromCwd } from './remote-workspace-safety.ts'
 
 interface LinkedSshBinding {
   alias: string
@@ -163,6 +164,16 @@ function hostView(host: HostEntryLike | undefined): Record<string, unknown> | un
 function promptText(store: LinkedSshBindingStore, hosts: HostLookupLike, context: any): string {
   const sessionId = typeof context?.agent?.id === 'string' ? context.agent.id : ''
   if (sessionId === '') return ''
+
+  const cwd = typeof context?.agent?.session?.header?.cwd === 'string'
+    ? context.agent.session.header.cwd
+    : undefined
+
+  // In a dsh-rw Remote Workspace the cwd metadata is authoritative and the UI
+  // deliberately gives it priority over any old additive Linked SSH binding.
+  // Do not emit a contradictory "Workspace remains LOCAL" prompt here.
+  if (remoteWorkspaceFromCwd(cwd) !== null) return ''
+
   const binding = store.get(sessionId)
   if (binding === undefined) return ''
   const host = hosts.find(binding.alias)
@@ -174,18 +185,15 @@ function promptText(store: LinkedSshBindingStore, hosts: HostLookupLike, context
     ].join('\n')
   }
 
-  const cwd = typeof context?.agent?.session?.header?.cwd === 'string'
-    ? context.agent.session.header.cwd
-    : undefined
   return [
     '## Linked SSH target',
-    `This session has an explicit remote target: SSH alias "${binding.alias}" (${host.user}@${host.host}:${host.port}).`,
+    `This session has exactly one explicit remote target: SSH alias "${binding.alias}" (${host.user}@${host.host}:${host.port}).`,
     cwd === undefined
       ? 'The DSH Workspace remains LOCAL.'
       : `The DSH Workspace remains LOCAL at ${cwd}.`,
     'Routing rule: native read/write/edit/str_replace_editor/glob/grep/bash/pwsh tools continue to operate on the LOCAL workspace. Do not treat them as remote commands merely because SSH is linked.',
-    `For REMOTE operations use the ssh_* tools with alias "${binding.alias}" (for example ssh_exec, ssh_upload, ssh_download).`,
-    `When the user says “服务器”, “远程”, “上传到服务器”, “查看服务器日志” or “部署” without naming another host, use "${binding.alias}" as the default remote target instead of calling ssh_list to guess.`,
+    `For REMOTE operations use the session-bound linked_ssh_* tools. They inject alias "${binding.alias}" automatically; do not call ssh_list and do not choose another configured host.`,
+    `When the user says “服务器”, “远程”, “上传到服务器”, “查看服务器日志” or “部署” without naming another host, it means ONLY "${binding.alias}" in this conversation.`,
     'Keep LOCAL build/package work and REMOTE server work conceptually separate. File transfer is the explicit bridge between them.',
   ].join('\n')
 }
