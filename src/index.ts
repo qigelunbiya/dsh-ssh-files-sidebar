@@ -1,5 +1,6 @@
 import { apply as applySsh } from '@linxin666/dsh-ssh'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
+import { installDeploymentRunbook } from './deployment-runbook.ts'
 import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
 import { installLinkedSshVisionTool } from './linked-ssh-vision.ts'
@@ -103,6 +104,12 @@ export function apply(ctx: any): void {
   // returns plain text to the Agent. It needs no visual-model API key and does
   // not materialize the image into the local Workspace or temp directory.
   installLinkedSshOcrTool(ctx, linkedStore)
+
+  // Project deployment knowledge layer. A LOCAL source Workspace owns exactly
+  // one DEPLOYMENT.md Runbook; the Agent can inspect/create/update it, but the
+  // runbook's target-ssh must match the conversation's existing SSH lock. This
+  // keeps build/package local, transfer explicit, and service operations remote.
+  installDeploymentRunbook(ctx, linkedStore)
 
   // Sent SSH references intentionally reuse Harness' native @file display
   // grammar, e.g. @ssh:131:/apps/web/test.txt. Teach the Agent that the token
