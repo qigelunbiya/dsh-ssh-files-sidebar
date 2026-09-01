@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { apply as applyBetterSidebarClient } from './embedded-better-sidebar-client.js'
 import { apply as applySshClient } from './embedded-ssh-client.js'
 import { LinkedSshHeaderAction } from './LinkedSshHeaderAction.tsx'
 import { registerLinkedSshReferenceSource } from './LinkedSshReferenceSource.ts'
@@ -216,22 +217,29 @@ function installSessionTerminalBrowserShortcutCompatibility(): () => void {
   return () => { window.removeEventListener('keydown', onKeyDown, true) }
 }
 
-// We compose the original dsh-ssh browser UI inside this one client plugin.
-// Because we call its apply() directly, our wrapper must declare every Cordis
-// service that the embedded client may access. In particular dsh-ssh's current
-// client reads settingsScope; without listing it here Cordis intentionally
-// throws "cannot get property settingsScope without inject".
+// We compose both dsh-better-sidebar and the original dsh-ssh browser UI into
+// this one client plugin. Because their apply() functions run inside our Cordis
+// fiber, this wrapper must declare the union of every service they access.
+// Crucially, betterSidebar is now PROVIDED here instead of injected from a
+// separate top-level plugin, eliminating the old pending-on-betterSidebar boot
+// failure when the external dsh-better-sidebar row is disabled.
 export const inject = [
-  'betterSidebar',
   'slots',
-  'locale',
+  'sessions',
   'connection',
+  'workspaces',
+  'locale',
+  'modules',
   'remote',
   'settingsScope',
   'inputTriggers',
 ]
 
 export function apply(ctx: any): void {
+  // Mount the sidebar workbench first. Its apply() synchronously publishes
+  // ctx.betterSidebar before our SSH Files tab is registered below.
+  applyBetterSidebarClient(ctx)
+
   // Original dsh-ssh browser surfaces remain available from the left SSH entry
   // for host management, transfer, tunnels and ad-hoc administration. The
   // session-bound terminal below is intentionally a different surface: it can

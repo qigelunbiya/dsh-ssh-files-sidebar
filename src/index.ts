@@ -1,4 +1,5 @@
 import { apply as applySsh } from '@linxin666/dsh-ssh'
+import { apply as applyBetterSidebar } from 'dsh-better-sidebar'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
 import { installDeploymentCommandReview } from './deployment-command-review.ts'
 import { installDeploymentRunbook } from './deployment-runbook.ts'
@@ -12,8 +13,8 @@ import { SharedDshSshHostTable } from './shared-hosts.ts'
 
 export const name = 'dsh-ssh-files-sidebar'
 
-/** Both embedded host halves need these services. */
-export const inject = ['tools', 'systemPrompt', 'webServer', 'agents']
+/** Services required by every host half composed into this one loader row. */
+export const inject = ['tools', 'systemPrompt', 'webServer', 'agents', 'sessions', 'webRuntime']
 
 interface DirectoryPickerLike {
   capability?: () =>
@@ -57,17 +58,22 @@ async function pickLocalDirectory(ctx: any): Promise<string | null> {
 /**
  * Host half of the integrated plugin.
  *
- * Important: @linxin666/dsh-ssh is NOT a second Cordis loader row. DSH resolves
- * loader-row package names from the profile root, while this package is used via
- * link: during development and its transitive dependencies live beside the
- * linked package. Mounting the SSH plugin programmatically keeps the whole stack
- * inside one resolvable top-level row and still registers the original routes,
- * tools, settings section and connection pool.
+ * Important: dsh-better-sidebar, @linxin666/dsh-ssh and dsh-rw are NOT
+ * separate Cordis loader rows. DSH resolves loader-row package names from the
+ * profile root, while this package is commonly used through link: and its
+ * transitive dependencies live beside the linked package. Mounting all three
+ * programmatically keeps the whole stack inside one resolvable top-level row.
  *
- * dsh-rw is then mounted in the same fiber with a HostTable adapter over the
- * SAME ~/.dsh/dsh-ssh.json file, so SSH credentials are configured only once.
+ * dsh-rw is mounted with a HostTable adapter over the SAME
+ * ~/.dsh/dsh-ssh.json file, so SSH credentials are configured only once.
  */
 export function apply(ctx: any): void {
+  // 0.8.0 owns the right-sidebar workbench itself. This removes the external
+  // loader dependency that previously left this plugin pending forever when
+  // dsh-better-sidebar was disabled. The matching browser half is composed in
+  // src/client/index.tsx, so one dsh-ssh-files-sidebar row is sufficient.
+  applyBetterSidebar(ctx)
+
   // Keep the original dsh-ssh backend/UI/raw tools registered for routes,
   // terminal, tunnels and file APIs, but do not let its standalone multi-host
   // prompt teach the Agent to enumerate every configured server. The raw tools
