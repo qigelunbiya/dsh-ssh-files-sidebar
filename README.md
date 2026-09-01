@@ -1,8 +1,45 @@
 # dsh-ssh-files-sidebar
 
-一个面向 DeepSeek Harness 的一体化 Remote SSH 插件层：把 `@linxin666/dsh-ssh` 的 SSH 运维能力、`dsh-rw` 的远程工作区/原生工具 Shim，以及 `dsh-better-sidebar` 里的远程文件树/编辑器组合到同一套体验里。
+一个面向 DeepSeek Harness 的一体化 Remote SSH 插件层：把 `dsh-better-sidebar` 的右侧工作台、`@linxin666/dsh-ssh` 的 SSH 运维能力、`dsh-rw` 的远程工作区/原生工具 Shim，以及本项目自己的 SSH Files / 部署 Runbook 组合到同一套体验里。
+
+> 0.8.0 起，`dsh-better-sidebar` 已经和 SSH / Remote Workspace 一样由本项目内部挂载。Profile **不再需要单独启用 `dsh-better-sidebar`**；只启动 `dsh-ssh-files-sidebar` 即可获得右侧工作台和 SSH Files。
 
 > 0.4.0 起，用户只维护一份 SSH 主机配置：`~/.dsh/dsh-ssh.json`。不再需要同时在 `@linxin666/dsh-ssh` 和 `dsh-rw` 各配一遍服务器。
+
+## 0.8.0 主要变化
+
+- `dsh-better-sidebar@0.16.1` 从外部 peer 改为本项目的内部运行依赖。
+- Host 端直接挂载 Better Sidebar 的 `/sidebar/*` 路由、终端/文件 API 和相关能力。
+- Browser 端把 Better Sidebar client source 编译进本项目自己的 `client.js`，并在注册 `SSH Files` 之前先提供 `ctx.betterSidebar`。
+- 本项目不再声明 `betterSidebar` 外部服务依赖，因此关闭/卸载独立 `dsh-better-sidebar` 后不会再出现 `pending (waiting for service: betterSidebar)`。
+- Better Sidebar、SSH、Remote Workspace 都只需要一个顶层 loader row：`dsh-ssh-files-sidebar`。
+- 为 Better Sidebar 的 client core 补齐 `sessions / workspaces / modules` 等注入以及普通 CSS 构建支持。
+
+### 从 0.7.x 升级到 0.8.0
+
+先更新和构建本项目：
+
+```powershell
+cd E:\fangzeming\deepseekHarness\dsh-ssh-files-sidebar
+
+git pull
+pnpm install
+pnpm build
+```
+
+然后把 Profile 中**单独安装的 Better Sidebar 删除**，再同步一次本项目的 `link:`：
+
+```powershell
+cd E:\fangzeming\deepseekHarness\deepseek-harness
+
+pnpm dsh plugin --profile web remove dsh-better-sidebar
+pnpm dsh plugin --profile web add link:E:/fangzeming/deepseekHarness/dsh-ssh-files-sidebar
+pnpm dsh web
+```
+
+如果 `remove dsh-better-sidebar` 提示未安装，可以忽略。启动后建议浏览器执行一次 `Ctrl + Shift + R` 硬刷新。
+
+> 不建议同时挂载独立 `dsh-better-sidebar` 和 0.8.0 的集成版本；两边都会尝试注册同一组 `/sidebar/*` 路由和右侧面板。
 
 ## 0.4.0 主要变化
 
@@ -27,7 +64,12 @@
 ```text
 一个顶层安装：dsh-ssh-files-sidebar
 │
-├─ @linxin666/dsh-ssh
+├─ dsh-better-sidebar（内部复用）
+│  ├─ 右侧工作台 / Files / Editor / Terminal / Browser
+│  ├─ betterSidebar Tab / Viewer registry
+│  └─ /sidebar/* host routes + client shell
+│
+├─ @linxin666/dsh-ssh（内部复用）
 │  ├─ ~/.dsh/dsh-ssh.json   ← 唯一 SSH 主机/凭据配置
 │  ├─ SSH 主机管理 UI
 │  ├─ Web Terminal / SFTP / Tunnel
@@ -39,8 +81,7 @@
 │  ├─ rw_* tools
 │  └─ Read / Write / Edit / Glob / Grep / Bash 透明远程 Shim
 │
-└─ SSH Files
-   ├─ 只在远程 Workspace 可打开
+└─ SSH Files（注册到内部 Better Sidebar）
    ├─ 远程文件树
    ├─ CodeMirror 编辑/保存
    ├─ 图片/PDF/压缩包预览
@@ -51,7 +92,7 @@
    └─ 会话级目录展开记忆
 ```
 
-`dsh-better-sidebar` 仍然是右侧工作台框架，需要启用；SSH 和远程工作区本身则由本项目一次安装带入。
+0.8.0 起，右侧 Better Sidebar、SSH 和远程工作区都由本项目一次安装带入，不需要再维护一个独立的 `dsh-better-sidebar` loader row。
 
 ## 首次安装
 
@@ -114,7 +155,7 @@ pnpm dsh web
 
 创建远程 Workspace 后，DSH 的会话 cwd 是本机的轻量占位目录，但 Agent 的 `Read/Write/Edit/Glob/Grep/Bash` 会由 dsh-rw Shim 自动转发到对应服务器；远程文件仍以服务器为 source of truth，不做本地镜像。
 
-`SSH Files` 会根据当前会话的远程 Workspace 自动绑定服务器。例如当前 Workspace 属于 `131`，右侧只能显示 `131`；切到普通本机 Workspace 后，`SSH Files` 不会出现在可打开列表中，已有 Tab 也只显示“仅远程工作区可用”的提示。
+`SSH Files` 会根据当前会话的远程 Workspace 或 Linked SSH 自动绑定服务器，服务器目标仍然跟随当前 Conversation，不提供独立的第二套主机选择。
 
 ## 文件树操作
 
@@ -181,14 +222,14 @@ PDF：浏览器内嵌预览。
 ~/.dsh/dsh-ssh.json
 ```
 
-由 `@linxin666/dsh-ssh` 负责主机管理和原有 SSH UI。远程 Workspace 侧通过兼容适配器读取同一文件，因此不需要再维护 `~/.dsh/dsh-rw.json` 的第二份主机列表。
+由内部挂载的 `@linxin666/dsh-ssh` 负责主机管理和原有 SSH UI。远程 Workspace 侧通过兼容适配器读取同一文件，因此不需要再维护 `~/.dsh/dsh-rw.json` 的第二份主机列表。
 
 删除目录会执行远程 `rm -rf -- <path>`，UI 会先要求确认；文件操作权限与当前 SSH 登录用户一致。重命名和新建目录分别通过远程 `mv` / `mkdir` 完成。
 
 ## 上游依赖
 
+- `dsh-better-sidebar@0.16.1`：MIT，来源 `omdsh-dev/DSH-better-sidebar`
 - `@linxin666/dsh-ssh`：Apache-2.0，来源 `DamonKoy/dsh-web-ui/packages/dsh-ssh`
 - `dsh-rw`：MIT，来源 `MDR-EX1000/dsh-rw`
-- `dsh-better-sidebar`：右侧 Sidebar 框架
 
 更完整的归属信息见 `NOTICE`。
