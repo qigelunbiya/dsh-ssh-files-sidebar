@@ -29,6 +29,13 @@ interface ListDirValue {
   error?: string
 }
 
+interface SshInternals {
+  SshEngine: new (store: any) => any
+  HostStore: new () => any
+}
+
+let sshInternalsPromise: Promise<SshInternals> | undefined
+
 function text(value: string) {
   return [{ type: 'text' as const, text: value }]
 }
@@ -37,19 +44,33 @@ function linkedAlias(store: LinkedSshBindingStore, exec: any): string {
   return requireEffectiveSessionSshAlias(store, exec)
 }
 
-async function callNested(ctx: any, exec: any, name: string, args: Record<string, unknown>): Promise<any> {
-  const result = await ctx.tools.execute({
-    callId: `${String(exec.callId)}:${name}`,
-    name,
-    arguments: args,
-    signal: exec.signal,
-    agent: exec.agent,
-    parent: exec.token,
-  })
-  if (result.isError) {
-    throw new Error(result.error?.message ?? `${name} failed`)
-  }
-  return result.value
+/**
+ * Load the same SSH engine/store implementation used by @linxin666/dsh-ssh,
+ * without dispatching through its generic model-facing ssh_* tools.
+ *
+ * This separation is important: raw ssh_* tools are deliberately restricted
+ * from every Agent so a conversation cannot enumerate/switch to another host.
+ * The session-bound linked_ssh_* wrappers therefore talk to SshEngine directly
+ * and inject the one effective alias resolved from the current conversation.
+ */
+async function loadSshInternals(): Promise<SshInternals> {
+  if (sshInternalsPromise !== undefined) return await sshInternalsPromise
+  sshInternalsPromise = (async () => {
+    const engineSpec = '@linxin666/dsh-ssh/src/engine.ts'
+    const storeSpec = '@linxin666/dsh-ssh/src/store.ts'
+    const [engineModule, storeModule] = await Promise.all([
+      import(engineSpec),
+      import(storeSpec),
+    ]) as any[]
+    if (typeof engineModule?.SshEngine !== 'function' || typeof storeModule?.HostStore !== 'function') {
+      throw new Error('@linxin666/dsh-ssh 当前版本没有暴露会话绑定工具所需的 SSH engine 接口')
+    }
+    return {
+      SshEngine: engineModule.SshEngine,
+      HostStore: storeModule.HostStore,
+    }
+  })()
+  return await sshInternalsPromise
 }
 
 function shQuote(value: string): string {
@@ -77,6 +98,31 @@ function renderExec(value: ExecValue): string {
   return parts.join('\n')
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+async function directExec(
+  engine: any,
+  alias: string,
+  command: string,
+  timeoutMs?: number,
+): Promise<ExecValue> {
+  try {
+    return await engine.exec(alias, command, timeoutMs) as ExecValue
+  } catch (error) {
+    return {
+      success: false,
+      exitCode: null,
+      timedOut: false,
+      stdout: '',
+      stderr: '',
+      durationMs: 0,
+      error: errorMessage(error),
+    }
+  }
+}
+
 const EXEC_OUTPUT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -101,12 +147,20 @@ const EXEC_OUTPUT_SCHEMA = {
  * binding. For a dsh-rw Remote Workspace it comes from that conversation cwd's
  * .dsh-rw-meta.json, matching the UI's remoteAlias ?? linkedAlias precedence.
  *
- * These are raw ToolDefinition objects rather than defineTool() wrappers. That
- * keeps this integration on the ToolRuntime service already supplied by DSH and
- * avoids adding another top-level @deepseek-ai/* package whose prerelease peer
- * graph may not match the operator's Harness checkout.
+ * Unlike the old implementation these wrappers do NOT call ctx.tools.execute()
+ * with ssh_exec/ssh_upload/ssh_download. That makes it safe to use DSH's native
+ * per-Agent tools.restrict() and global tools.guard() to remove the raw
+ * multi-host SSH surface completely.
  */
 export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStore): void {
+  let directEngine: any
+  const getEngine = async (): Promise<any> => {
+    if (directEngine !== undefined) return directEngine
+    const internals = await loadSshInternals()
+    directEngine = new internals.SshEngine(new internals.HostStore())
+    return directEngine
+  }
+
   const linkedExec = {
     name: 'linked_ssh_exec',
     description: 'Execute a command on the one SSH server bound to THIS conversation. No host alias is required or allowed. Use this for remote/server commands, process inspection, logs, services, deployment inspection, and remote filesystem operations.',
@@ -125,11 +179,8 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
     },
     async execute(args: { command: string; timeoutMs?: number }, exec: any): Promise<ExecValue> {
       const alias = linkedAlias(store, exec)
-      return await callNested(ctx, exec, 'ssh_exec', {
-        alias,
-        command: args.command,
-        ...(args.timeoutMs === undefined ? {} : { timeoutMs: args.timeoutMs }),
-      }) as ExecValue
+      const engine = await getEngine()
+      return await directExec(engine, alias, args.command, args.timeoutMs)
     },
   }
 
@@ -170,10 +221,8 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
       const alias = linkedAlias(store, exec)
       const path = normalizeRemotePath(args.path)
       const flags = args.all === false ? '-l' : '-la'
-      const result = await callNested(ctx, exec, 'ssh_exec', {
-        alias,
-        command: `LC_ALL=C ls ${flags} -- ${shQuote(path)}`,
-      }) as ExecValue
+      const engine = await getEngine()
+      const result = await directExec(engine, alias, `LC_ALL=C ls ${flags} -- ${shQuote(path)}`)
       return {
         alias,
         path,
@@ -216,11 +265,13 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
     },
     async execute(args: { localPath: string; remotePath: string }, exec: any): Promise<TransferValue> {
       const alias = linkedAlias(store, exec)
-      return await callNested(ctx, exec, 'ssh_upload', {
-        alias,
-        localPath: args.localPath,
-        remotePath: args.remotePath,
-      }) as TransferValue
+      const engine = await getEngine()
+      try {
+        const outcome = await engine.upload(alias, args.localPath, args.remotePath, false)
+        return { ok: true, transferredBytes: outcome.bytes, files: outcome.files }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
     },
   }
 
@@ -253,18 +304,23 @@ export function installLinkedSshAgentTools(ctx: any, store: LinkedSshBindingStor
     },
     async execute(args: { remotePath: string; localPath: string }, exec: any): Promise<TransferValue> {
       const alias = linkedAlias(store, exec)
-      return await callNested(ctx, exec, 'ssh_download', {
-        alias,
-        remotePath: args.remotePath,
-        localPath: args.localPath,
-      }) as TransferValue
+      const engine = await getEngine()
+      try {
+        const outcome = await engine.download(alias, args.remotePath, args.localPath)
+        return { ok: true, bytes: outcome.bytes }
+      } catch (error) {
+        return { ok: false, error: errorMessage(error) }
+      }
     },
   }
 
   ctx.effect(() => {
     const disposers = [linkedExec, linkedListDir, linkedUpload, linkedDownload]
       .map(tool => ctx.tools.register(tool))
-    return () => { for (const dispose of disposers) dispose() }
+    return () => {
+      for (const dispose of disposers) dispose()
+      try { directEngine?.dispose?.() } catch { /* already disposed */ }
+    }
   }, 'dsh-ssh-files-sidebar: Linked SSH agent tools')
 
   ctx.effect(() => ctx.systemPrompt.section({
