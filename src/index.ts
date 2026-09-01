@@ -1,5 +1,6 @@
 import { apply as applySsh } from '@linxin666/dsh-ssh'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
+import { installDeploymentCommandReview } from './deployment-command-review.ts'
 import { installDeploymentRunbook } from './deployment-runbook.ts'
 import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
@@ -110,6 +111,12 @@ export function apply(ctx: any): void {
   // runbook's target-ssh must match the conversation's existing SSH lock. This
   // keeps build/package local, transfer explicit, and service operations remote.
   installDeploymentRunbook(ctx, linkedStore)
+
+  // 0.7.1 keeps deployment commands operator-visible and atomized. The normal
+  // workflow uses Harness' native ask_user_question card for plan review; a
+  // small pre-execute fence rejects opaque batched remote mutations and leaves
+  // unusually high-risk single commands to Harness' native approval seam.
+  installDeploymentCommandReview(ctx)
 
   // Sent SSH references intentionally reuse Harness' native @file display
   // grammar, e.g. @ssh:131:/apps/web/test.txt. Teach the Agent that the token
