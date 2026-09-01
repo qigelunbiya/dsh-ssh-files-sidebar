@@ -1,31 +1,18 @@
 import type { LinkedSshBindingStore } from './linked-ssh.ts'
 import { effectiveSessionSshAlias } from './session-ssh-target.ts'
 
-function toolName(tool: any): string | null {
-  return typeof tool?.name === 'string' ? tool.name : null
-}
+/** Raw multi-host tools registered by @linxin666/dsh-ssh 0.3.x. */
+const RAW_SSH_TOOL_NAMES = [
+  'ssh_list',
+  'ssh_exec',
+  'ssh_upload',
+  'ssh_download',
+  'ssh_tunnel',
+  'ssh_cluster',
+] as const
 
 function isRawSshToolName(name: unknown): name is string {
   return typeof name === 'string' && name.startsWith('ssh_') && !name.startsWith('linked_ssh_')
-}
-
-function isLinkedSshToolName(name: unknown): name is string {
-  return typeof name === 'string' && name.startsWith('linked_ssh_')
-}
-
-function argumentAlias(exec: any): string | undefined {
-  const args = exec?.arguments ?? exec?.args
-  if (args === null || typeof args !== 'object') return undefined
-  const alias = (args as Record<string, unknown>).alias
-  return typeof alias === 'string' && alias !== '' ? alias : undefined
-}
-
-function blocked(message: string): any {
-  return {
-    isError: true,
-    content: [{ type: 'text', text: `Error: ${message}` }],
-    error: { message },
-  }
 }
 
 function lockPrompt(alias: string | null): string {
@@ -33,79 +20,96 @@ function lockPrompt(alias: string | null): string {
     return [
       '## SSH session lock',
       'This conversation currently has NO SSH target.',
-      'Do not enumerate configured SSH hosts and do not guess a server. Raw `ssh_*` tools are intentionally hidden from the model.',
+      'The generic multi-host ssh_* surface is unavailable. Do not enumerate configured SSH hosts and do not guess a server.',
       'If remote work is required, the user must first select a server in the conversation header or enter a Remote Workspace.',
     ].join('\n')
   }
 
   return [
     '## SSH session lock',
-    `This conversation is LOCKED to SSH alias "${alias}". That is the only remote server this Agent may inspect or modify in this conversation.`,
-    `Never enumerate or probe other configured SSH hosts. Do not call ssh_list. Do not switch to another alias even if another host appears in prior conversation history or configuration.`,
-    `For remote work use the advertised session-bound linked_ssh_* tools; they inject alias "${alias}" automatically.`,
-    `If the user asks about “服务器”, “远程”, processes, services, logs, files, deployment, ports, or commands without naming a host, it means ONLY "${alias}" in this conversation.`,
+    `This conversation is LOCKED to SSH alias "${alias}". That is the ONE AND ONLY remote server this Agent may inspect or modify in this conversation.`,
+    'Other configured SSH hosts are outside this conversation even if their aliases/IPs appear in old chat history, configuration, or previous tool results.',
+    'Never enumerate configured SSH hosts. Never call ssh_list. Never choose or probe another alias.',
+    `For remote work use only the advertised session-bound linked_ssh_* tools; they inject "${alias}" automatically and expose no alias selector to the model.`,
+    `When the user says “服务器”, “远程”, processes, services, logs, files, deployment, ports, or commands without naming a host, it means ONLY "${alias}" in this conversation.`,
+    'If the user wants another server, they must switch the conversation header/Remote Workspace first; do not switch servers on their behalf inside a tool call.',
   ].join('\n')
 }
 
 /**
- * Enforce one remote target per conversation.
+ * Enforce one remote target per conversation using ToolRuntime's native
+ * security/visibility primitives rather than relying on prompt-assembly edits.
  *
- * The embedded @linxin666/dsh-ssh plugin intentionally exposes generic ssh_*
- * tools, including ssh_list and alias-taking ssh_exec. Those are useful for its
- * standalone multi-host workflow but conflict with this plugin's session-bound
- * design: once the header says 131, the model must not discover or operate 122.
+ * @linxin666/dsh-ssh must stay enabled because its routes, terminal, SFTP and
+ * host store power the UI. While enabled it also registers generic multi-host
+ * model tools (ssh_list/ssh_exec/...). Those tools conflict with this plugin's
+ * session-bound contract, so every Agent receives a scoped tools.restrict()
+ * deny-mask for the raw SSH names.
  *
- * We keep the raw tools registered internally because linked_ssh_* delegates to
- * them. They are removed from the model's assembled tool list, and execution is
- * guarded so stale tool traces cannot cross the current session target either.
+ * The restriction is authoritative for BOTH model presentation and dispatch.
+ * A global monotonic tools.guard() is the second boundary: stale history or a
+ * hand-crafted call cannot execute any raw ssh_* body even if presentation is
+ * bypassed. linked_ssh_* no longer delegates through ToolRuntime raw tools; it
+ * talks to SshEngine directly, so denying every raw call is safe.
  */
 export function installSessionSshTargetSafety(ctx: any, store: LinkedSshBindingStore): void {
-  ctx.effect(() => ctx.on('system-prompt/assemble', async (_assembly: any, context: any, next: () => Promise<any>) => {
-    const resolved = await next()
-    const alias = effectiveSessionSshAlias(store, context)
+  const restrictions = new Map<any, () => void>()
 
-    const tools = Array.isArray(resolved?.tools)
-      ? resolved.tools.filter((tool: any) => {
-          const name = toolName(tool)
-          if (name === null) return true
-          // Generic multi-host SSH tools are never model-facing in this plugin.
-          if (isRawSshToolName(name)) return false
-          // With no selected server, hide session-bound SSH tools too; a later
-          // turn after the user selects a server will assemble them again.
-          if (alias === null && isLinkedSshToolName(name)) return false
-          return true
-        })
-      : resolved?.tools
+  const protectAgent = (agent: any): void => {
+    if (agent === null || typeof agent !== 'object' || restrictions.has(agent)) return
 
-    const sections = Array.isArray(resolved?.sections)
-      ? [...resolved.sections, { name: 'plugin:dsh-ssh-session-lock', text: lockPrompt(alias) }]
-      : resolved?.sections
+    // tools.restrict() rejects unknown names, so materialize only raw tools that
+    // are actually registered in this runtime. The embedded dsh-ssh 0.3.4
+    // contributes all six, while this keeps the fence forward/back compatible.
+    const deny = RAW_SSH_TOOL_NAMES.filter(name => ctx.tools.get(name) !== undefined)
+    if (deny.length === 0) return
 
-    return { ...resolved, tools, sections }
-  }), 'dsh-ssh-files-sidebar: one SSH target per session')
+    const dispose = agent.ctx.tools.restrict({ deny })
+    restrictions.set(agent, dispose)
+  }
 
-  ctx.effect(() => ctx.on('tools/execute', async (exec: any, next: () => Promise<any>) => {
-    if (!isRawSshToolName(exec?.name)) return await next()
-
-    const lockedAlias = effectiveSessionSshAlias(store, exec)
-    if (lockedAlias === null) {
-      return blocked(`Raw ${String(exec?.name)} call blocked: this conversation has no selected SSH target. Select a server in the header first.`)
+  // The plugin may be loaded/reloaded after one or more sessions already exist.
+  // Protect those immediately instead of waiting for the next agent lifecycle.
+  ctx.effect(() => {
+    const agents = typeof ctx?.agents?.list === 'function' ? ctx.agents.list() : []
+    for (const agent of agents) protectAgent(agent)
+    return () => {
+      for (const dispose of restrictions.values()) {
+        try { dispose() } catch { /* scope may already be disposed */ }
+      }
+      restrictions.clear()
     }
+  }, 'dsh-ssh-files-sidebar: restrict existing agents from raw SSH tools')
 
-    const requestedAlias = argumentAlias(exec)
-    if (requestedAlias === undefined) {
-      // This intentionally blocks ssh_list and any other raw host-enumeration /
-      // host-selection operation that is not already pinned to the session alias.
-      return blocked(`Raw ${String(exec?.name)} call blocked: this conversation is locked to SSH "${lockedAlias}" and host enumeration/switching is not allowed. Use linked_ssh_* tools.`)
+  // Every future conversation gets the same scoped restriction before its first
+  // normal turn. Agent.ctx is the official scope for ToolRuntime restrictions.
+  ctx.effect(() => ctx.on('agent/created', ({ agent }: any) => {
+    protectAgent(agent)
+  }), 'dsh-ssh-files-sidebar: restrict new agents from raw SSH tools')
+
+  ctx.effect(() => ctx.on('agent/disposed', ({ agent }: any) => {
+    // Agent scope teardown owns the restriction contribution. Just forget the
+    // disposer so plugin cleanup never tries to touch a dead scope.
+    restrictions.delete(agent)
+  }), 'dsh-ssh-files-sidebar: forget disposed SSH restrictions')
+
+  // Monotonic dispatch guard: unlike an around-listener this cannot be undone
+  // by listener ordering. Raw multi-host SSH execution is simply not a valid
+  // capability while this integrated plugin owns session routing.
+  ctx.effect(() => ctx.tools.guard((exec: any) => {
+    if (!isRawSshToolName(exec?.name)) return undefined
+    const alias = effectiveSessionSshAlias(store, exec)
+    if (alias === null) {
+      return `Raw ${String(exec?.name)} is disabled: this conversation has no SSH target. Select a server in the header first.`
     }
+    return `Raw ${String(exec?.name)} is disabled: this conversation is locked to SSH "${alias}". Use the corresponding linked_ssh_* capability; host enumeration and alias switching are forbidden.`
+  }), 'dsh-ssh-files-sidebar: hard-deny raw multi-host SSH dispatch')
 
-    if (requestedAlias !== lockedAlias) {
-      return blocked(`SSH target mismatch blocked: this conversation is locked to "${lockedAlias}", but ${String(exec?.name)} requested "${requestedAlias}". Other configured servers are outside this conversation.`)
-    }
-
-    // linked_ssh_* delegates to the embedded raw tool with the already-resolved
-    // alias. A direct stale raw call to the SAME alias is also harmless; the
-    // important invariant is that no call can escape to another server.
-    return await next()
-  }), 'dsh-ssh-files-sidebar: block cross-server raw SSH calls')
+  // Prompt text is now explanatory only. Enforcement lives in restrict()+guard,
+  // so a model cannot escape the boundary by ignoring prose.
+  ctx.effect(() => ctx.systemPrompt.section({
+    name: 'plugin:dsh-ssh-session-lock',
+    order: 150,
+    text: (context: any) => lockPrompt(effectiveSessionSshAlias(store, context)),
+  }), 'dsh-ssh-files-sidebar: one SSH target per session prompt')
 }
