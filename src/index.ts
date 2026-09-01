@@ -118,10 +118,10 @@ export function apply(ctx: any): void {
   // keeps build/package local, transfer explicit, and service operations remote.
   installDeploymentRunbook(ctx, linkedStore)
 
-  // 0.7.1 keeps deployment commands operator-visible and atomized. The normal
-  // workflow uses Harness' native ask_user_question card for plan review; a
-  // small pre-execute fence rejects opaque batched remote mutations and leaves
-  // unusually high-risk single commands to Harness' native approval seam.
+  // 0.8.1 keeps deployment logic visible without forcing artificial atomization.
+  // Compound shell blocks are allowed when fully shown in DEPLOYMENT.md; the
+  // review layer only guards generated one-click wrapper scripts and preserves
+  // Harness' native approval checkpoint for genuinely high-risk operations.
   installDeploymentCommandReview(ctx)
 
   // Sent SSH references intentionally reuse Harness' native @file display
