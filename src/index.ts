@@ -11,7 +11,7 @@ import { SharedDshSshHostTable } from './shared-hosts.ts'
 export const name = 'dsh-ssh-files-sidebar'
 
 /** Both embedded host halves need these services. */
-export const inject = ['tools', 'systemPrompt', 'webServer']
+export const inject = ['tools', 'systemPrompt', 'webServer', 'agents']
 
 interface DirectoryPickerLike {
   capability?: () =>
@@ -66,10 +66,10 @@ async function pickLocalDirectory(ctx: any): Promise<string | null> {
  * SAME ~/.dsh/dsh-ssh.json file, so SSH credentials are configured only once.
  */
 export function apply(ctx: any): void {
-  // Keep the original dsh-ssh backend/UI/raw tools registered for internal
-  // delegation, terminal, tunnels and file APIs, but do not let its standalone
-  // multi-host prompt teach the Agent to enumerate every configured server.
-  // This integrated plugin owns Agent routing and enforces one target/session.
+  // Keep the original dsh-ssh backend/UI/raw tools registered for routes,
+  // terminal, tunnels and file APIs, but do not let its standalone multi-host
+  // prompt teach the Agent to enumerate every configured server. The raw tools
+  // are additionally removed/guarded from every Agent below.
   applySsh(ctx, { enabled: true, announceToAgent: false })
 
   // One shared view of ~/.dsh/dsh-ssh.json backs both Remote Workspace and the
@@ -81,11 +81,10 @@ export function apply(ctx: any): void {
   const linkedStore = installLinkedSsh(ctx, hosts)
 
   // Hard invariant: the Agent never gets a generic multi-host SSH surface.
-  // Raw ssh_* tools remain available internally to the session-bound wrappers,
-  // but are hidden from model assembly. Stale/raw calls are blocked unless the
-  // requested alias exactly equals the current conversation target. ssh_list
-  // and other host enumeration/switching calls are therefore impossible once
-  // a session target is selected, and impossible without a selected target too.
+  // Official per-Agent ToolRuntime restrictions hide raw ssh_* schemas and
+  // dispatch, while a global monotonic guard blocks stale/hand-crafted raw
+  // calls. The model-facing linked_ssh_* wrappers use SshEngine directly, so
+  // this fence cannot break their internal operation.
   installSessionSshTargetSafety(ctx, linkedStore)
 
   // Session-bound model tools remove the alias parameter entirely. The target
