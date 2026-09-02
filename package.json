@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.8.3",
+  "version": "0.8.4",
   "description": "Integrated DSH Better Sidebar, Remote SSH workspace, Linked SSH, deployment runbooks, SSH operations UI and VSCode-like remote file explorer/editor.",
   "type": "module",
   "license": "MIT",
