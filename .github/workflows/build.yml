@@ -29,6 +29,7 @@ jobs:
           pnpm pack --pack-destination .artifacts
           PACKAGE="$(find .artifacts -maxdepth 1 -type f -name '*.tgz' -print -quit)"
           test -n "$PACKAGE"
-          tar -tzf "$PACKAGE" | grep -q 'package/lib/index.js'
-          tar -tzf "$PACKAGE" | grep -q 'package/lib/client.js'
-          tar -tzf "$PACKAGE" | grep -q 'package/cordis.patch.yml'
+          tar -tzf "$PACKAGE" > .artifacts/package-contents.txt
+          grep -q 'package/lib/index.js' .artifacts/package-contents.txt
+          grep -q 'package/lib/client.js' .artifacts/package-contents.txt
+          grep -q 'package/cordis.patch.yml' .artifacts/package-contents.txt

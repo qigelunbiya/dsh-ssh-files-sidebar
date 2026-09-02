@@ -68,9 +68,10 @@ jobs:
           SOURCE="$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)"
           test -n "$SOURCE"
           mv "$SOURCE" release/dsh-ssh-files-sidebar.tgz
-          tar -tzf release/dsh-ssh-files-sidebar.tgz | grep -q 'package/lib/index.js'
-          tar -tzf release/dsh-ssh-files-sidebar.tgz | grep -q 'package/lib/client.js'
-          tar -tzf release/dsh-ssh-files-sidebar.tgz | grep -q 'package/cordis.patch.yml'
+          tar -tzf release/dsh-ssh-files-sidebar.tgz > release/package-contents.txt
+          grep -q 'package/lib/index.js' release/package-contents.txt
+          grep -q 'package/lib/client.js' release/package-contents.txt
+          grep -q 'package/cordis.patch.yml' release/package-contents.txt
           (cd release && sha256sum dsh-ssh-files-sidebar.tgz > SHA256SUMS.txt)
 
       - name: Create GitHub Release
