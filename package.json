@@ -1,25 +1,42 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.8.5",
-  "description": "Integrated Remote SSH workspace and closed-loop deployment agent for DeepSeek Harness, with SSH Files, terminal, runbooks, zero-to-one deployment bootstrap, automation, vision/OCR and session-bound safety.",
+  "version": "0.8.6",
+  "description": "Remote SSH workspace and closed-loop deployment Agent for DeepSeek Harness: SSH Files, terminal, remote editing, zero-to-one Bootstrap, Runbooks, automation, Vision/OCR and safe recovery.",
   "keywords": [
+    "dsh-plugin",
     "deepseek-harness",
+    "dsh",
+    "deepseek",
     "remote-ssh",
     "ssh",
     "sftp",
+    "remote-development",
     "remote-workspace",
+    "ssh-files",
+    "terminal",
+    "server-management",
     "deployment",
+    "deployment-automation",
     "devops",
     "runbook",
-    "automation",
+    "agentic-ai",
     "agent",
-    "codemirror"
+    "codemirror",
+    "typescript"
   ],
   "type": "module",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/qigelunbiya/dsh-ssh-files-sidebar.git"
+  },
+  "homepage": "https://github.com/qigelunbiya/dsh-ssh-files-sidebar#readme",
+  "bugs": {
+    "url": "https://github.com/qigelunbiya/dsh-ssh-files-sidebar/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -71,7 +88,9 @@
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\" && tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
-    "bundle": "tsdown"
+    "bundle": "tsdown",
+    "prepare": "pnpm bundle",
+    "prepack": "pnpm build"
   },
   "dependencies": {
     "@linxin666/dsh-ssh": "0.3.4",

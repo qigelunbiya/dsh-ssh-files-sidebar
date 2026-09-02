@@ -10,11 +10,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+
       - run: pnpm install --no-frozen-lockfile
       - run: pnpm build
+
+      - name: Verify distributable package
+        shell: bash
+        run: |
+          mkdir -p .artifacts
+          pnpm pack --pack-destination .artifacts
+          PACKAGE="$(find .artifacts -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$PACKAGE"
+          tar -tzf "$PACKAGE" | grep -q 'package/lib/index.js'
+          tar -tzf "$PACKAGE" | grep -q 'package/lib/client.js'
+          tar -tzf "$PACKAGE" | grep -q 'package/cordis.patch.yml'

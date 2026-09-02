@@ -1,0 +1,89 @@
+name: release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - package.json
+      - src/**
+      - cordis.patch.yml
+      - tsconfig*.json
+      - tsdown.config.ts
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Resolve package version
+        id: version
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether release already exists
+        id: existing
+        shell: bash
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build
+        if: steps.existing.outputs.exists != 'true'
+        run: pnpm build
+
+      - name: Pack prebuilt plugin
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          mkdir -p release
+          pnpm pack --pack-destination release
+          SOURCE="$(find release -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$SOURCE"
+          mv "$SOURCE" release/dsh-ssh-files-sidebar.tgz
+          tar -tzf release/dsh-ssh-files-sidebar.tgz | grep -q 'package/lib/index.js'
+          tar -tzf release/dsh-ssh-files-sidebar.tgz | grep -q 'package/lib/client.js'
+          tar -tzf release/dsh-ssh-files-sidebar.tgz | grep -q 'package/cordis.patch.yml'
+          (cd release && sha256sum dsh-ssh-files-sidebar.tgz > SHA256SUMS.txt)
+
+      - name: Create GitHub Release
+        if: steps.existing.outputs.exists != 'true'
+        shell: bash
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            --target "$GITHUB_SHA" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes \
+            release/dsh-ssh-files-sidebar.tgz \
+            release/SHA256SUMS.txt
+
+      - name: Existing release
+        if: steps.existing.outputs.exists == 'true'
+        run: echo "Release ${{ steps.version.outputs.tag }} already exists; nothing to publish."

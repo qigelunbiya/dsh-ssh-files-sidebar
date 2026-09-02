@@ -1,331 +1,310 @@
 <div align="center">
 
-# dsh-ssh-files-sidebar
+# DSH Remote Workspace & Deployment Agent
 
-**An integrated Remote SSH workspace and closed-loop deployment agent for DeepSeek Harness**
+### `dsh-ssh-files-sidebar`
 
-One plugin for the right-side workbench, SSH hosts and terminal, Remote Workspace, SSH Files, remote vision/OCR, zero-to-one deployment bootstrap, deployment runbooks, automation scripts, and agent-operated delivery.
+**A complete Remote SSH workspace for DeepSeek Harness: files, terminal, remote editing, zero-to-one deployment, runbooks, automation, and closed-loop delivery.**
 
 [![build](https://github.com/qigelunbiya/dsh-ssh-files-sidebar/actions/workflows/build.yml/badge.svg)](https://github.com/qigelunbiya/dsh-ssh-files-sidebar/actions/workflows/build.yml)
-[![version](https://img.shields.io/github/package-json/v/qigelunbiya/dsh-ssh-files-sidebar)](./package.json)
+[![release](https://img.shields.io/github/v/release/qigelunbiya/dsh-ssh-files-sidebar?display_name=tag)](https://github.com/qigelunbiya/dsh-ssh-files-sidebar/releases/latest)
 [![license](https://img.shields.io/github/license/qigelunbiya/dsh-ssh-files-sidebar)](./LICENSE)
+[![DSH Plugin](https://img.shields.io/badge/DeepSeek%20Harness-plugin-5b5bd6)](https://github.com/topics/dsh-plugin)
 
 [简体中文](./README.md) · **English**
+
+<img src="./docs/assets/hero.svg" alt="DSH Remote Workspace & Deployment Agent" width="920" />
 
 </div>
 
 ---
 
-## What this project is
+## Understand it in 30 seconds
 
-`dsh-ssh-files-sidebar` is more than a file sidebar and more than a thin SSH command wrapper. It brings the remote-development, server-operations, and deployment pieces around DeepSeek Harness into one workflow:
+Use this plugin when your DeepSeek Harness workflow involves:
 
-- **One top-level plugin**: internally composes `dsh-better-sidebar`, `@linxin666/dsh-ssh`, and `dsh-rw`.
-- **One SSH configuration**: hosts and credentials are shared through `~/.dsh/dsh-ssh.json`.
-- **Local + remote execution planes**: source code, builds, and artifacts stay in the LOCAL Workspace; server operations stay locked to the single SSH target of the current conversation.
-- **VS Code-like SSH Files**: browse, edit, preview, upload, download, rename, delete, and multi-select remote files.
-- **Agent-readable remote content**: direct remote image inspection plus a local OCR path on supported Windows/macOS environments.
-- **Zero-to-one deployment bootstrap**: inspect an unfamiliar local project and the target server, progressively confirm requirements, attempt the deployment, diagnose logs, and capture a Runbook only after a real working path exists.
-- **Deployment maturity from knowledge to a closed loop**: Runbook → user validation → workflow-habit interview → optional one-click automation → agent-operated deploy, verification, acceptance, diagnosis, and recovery.
+- Linux / SSH servers;
+- remote file browsing, editing, upload, and download;
+- local source code with remote service startup, logs, and port checks;
+- an unfamiliar project whose deployment procedure is not known yet;
+- capturing a working procedure into `DEPLOYMENT.md`;
+- graduating a validated Runbook into one-click automation and eventually agent-operated delivery, verification, diagnosis, and recovery.
 
-> Core principle: **understand the real environment first, document what is actually proven, validate before automating, then let the Agent operate the mature workflow.**
+The goal is to keep all of that inside **one conversation, one SSH safety boundary, and one deployment maturity path**.
 
-## Two deployment entry paths, one mature closed loop
+### More than an SSH file sidebar
 
-Since 0.8.5, deployment explicitly supports two very different starting points.
+| Capability | `dsh-ssh-files-sidebar` |
+| --- | --- |
+| SSH Files / SFTP / Terminal | ✅ |
+| Remote Workspace | ✅ |
+| Local source + session-bound Linked SSH | ✅ |
+| Remote Vision / system OCR | ✅ |
+| Zero-to-one deployment of unfamiliar projects | ✅ |
+| `DEPLOYMENT.md` Runbook | ✅ |
+| Automation boundary based on real user habits | ✅ |
+| One-click scripts | ✅, only after Runbook validation |
+| Agent-operated deploy + health/log verification | ✅ |
+| UAT-driven diagnosis / fix / rollback loop | ✅ |
+
+> Core principle: **discover the real environment and workflow first, document it second, automate it only after validation, and let the Agent operate the loop only after that automation is proven.**
+
+---
+
+## One-minute install
+
+### Recommended: prebuilt GitHub Release
+
+With an installed `dsh` CLI:
+
+```powershell
+dsh plugin --profile web add https://github.com/qigelunbiya/dsh-ssh-files-sidebar/releases/latest/download/dsh-ssh-files-sidebar.tgz
+```
+
+From a DeepSeek Harness source checkout:
+
+```powershell
+pnpm dsh plugin --profile web add https://github.com/qigelunbiya/dsh-ssh-files-sidebar/releases/latest/download/dsh-ssh-files-sidebar.tgz
+```
+
+Then start or restart the Web profile:
+
+```powershell
+dsh web
+```
+
+or, from source:
+
+```powershell
+pnpm dsh web
+```
+
+The release tarball already contains `lib/`, so normal users do **not** need to clone the repository, install dependencies, build the package, or grant install-time build permission.
+
+> DeepSeek Harness also supports direct GitHub source installs. With pnpm 10, however, a git dependency's `prepare` script must be explicitly allowlisted. That is why this project recommends the prebuilt release tarball for normal users.
+
+### GitHub source install (development / debugging)
+
+```powershell
+dsh plugin --profile web add github:qigelunbiya/dsh-ssh-files-sidebar
+```
+
+This repository provides `prepare`, so a git install can build its runtime bundle. If pnpm 10 blocks the script, follow the DSH / pnpm message and add `dsh-ssh-files-sidebar: true` under the profile's `pnpm-workspace.yaml -> allowBuilds`, then retry.
+
+---
+
+## Product capabilities
+
+### 1. Remote SSH Workspace
+
+One top-level plugin composes:
+
+- `dsh-better-sidebar`
+- `@linxin666/dsh-ssh`
+- `dsh-rw`
+- this project's SSH Files / Linked SSH / Deployment Layer
+
+Hosts and credentials have one source of truth:
+
+```text
+~/.dsh/dsh-ssh.json
+```
+
+One conversation binds one SSH target. The Agent does not get a free multi-host surface for host enumeration or switching.
+
+### 2. SSH Files + Editor + Terminal
+
+SSH Files includes:
+
+- remote directory tree;
+- CodeMirror edit / save;
+- image, PDF, HTML, and archive preview;
+- multi-select;
+- upload / download;
+- inline rename;
+- directory creation / delete;
+- per-session expansion memory.
+
+Shortcuts:
+
+| Action | Shortcut |
+| --- | --- |
+| Toggle selection | `Ctrl/Cmd + Click` |
+| Range select | `Shift + Click` |
+| Select visible items | `Ctrl/Cmd + A` |
+| Inline rename | `F2` |
+| Delete | `Delete` |
+| Save | `Ctrl/Cmd + S` |
+| Search / replace | `Ctrl/Cmd + F` |
+
+### 3. Local Workspace + Linked SSH
+
+Recommended development / deployment model:
+
+```text
+LOCAL Workspace (real source)
+        +
+Conversation Linked SSH (single target)
+        +
+Project-root DEPLOYMENT.md
+```
+
+Git, builds, and artifact checks stay local. Uploads, service management, logs, and health checks stay locked to the current conversation's server.
+
+### 4. Remote Vision / OCR
+
+The Agent can inspect images directly from the current SSH target. Text-only flows can use supported system OCR paths without manually copying a server screenshot into the local Workspace first.
+
+---
+
+## From "I don't know how to deploy this" to a closed loop
+
+Two entry paths converge on the same mature workflow.
 
 ```mermaid
 flowchart TD
-    A1["Path A: known deployment experience<br/>commands / old docs / known procedure"] --> B1["Reconcile LOCAL + REMOTE reality"]
-    B1 --> R["DEPLOYMENT.md<br/>reviewable deployment Runbook"]
+    A1["Known deployment experience<br/>commands / docs / procedure"] --> B1["Reconcile LOCAL + REMOTE"]
+    B1 --> R["DEPLOYMENT.md<br/>reviewable Runbook"]
 
-    A2["Path B: no trusted deployment knowledge<br/>local project + target server"] --> L["Discover LOCAL project<br/>structure / runtime / artifacts / dependencies"]
-    L --> S["Discover REMOTE environment<br/>OS / runtime / directories / ports / permissions"]
-    S --> Q["Progressively confirm deployment requirements"]
+    A2["Unfamiliar project<br/>only source + target server"] --> L["Discover LOCAL<br/>structure / runtime / artifact / dependencies"]
+    L --> S["Discover REMOTE<br/>OS / runtime / path / ports / permissions"]
+    S --> Q["Progressively confirm real user requirements"]
     Q --> P["Bootstrap Plan"]
-    P --> T["Attempt deploy / start"]
+    P --> T["Attempt deployment / startup"]
     T --> X{"Technical verification passes?"}
-    X -->|No| D["Diagnose logs / stderr / process / port"]
+    X -->|No| D["stderr / logs / process / port diagnosis"]
     D --> C{"Safe to fix?"}
-    C -->|Yes| F["Apply the smallest fix and retry"]
+    C -->|Yes| F["Smallest correction and retry"]
     F --> T
-    C -->|No| STOP["Explicitly report that the server cannot safely run it"]
+    C -->|No| STOP["State that this target cannot be deployed safely"]
     X -->|Yes| BASE["Summarize the path that actually worked"]
     BASE --> R
 
-    R --> V["User actually uses and validates the Runbook"]
+    R --> V["User uses and validates the Runbook"]
     V --> H["Interview real operating habits<br/>define automation boundary"]
     H --> O["Generate and validate one-click automation"]
-    O --> E["Agent executes the release"]
-    E --> K["Technical verification<br/>process / port / health / logs"]
+    O --> E["Agent operates the release"]
+    E --> K["Process / port / health / log verification"]
     K --> G["Analyze Change Set<br/>suggest focused tests"]
     G --> U{"User acceptance testing"}
     U -->|Healthy| DONE["Done"]
-    U -->|Issue found| Z["Logs / state / Change Set diagnosis"]
-    Z --> RISK{"Risk and recovery decision"}
-    RISK -->|Safe to isolate| FIX["Fix"]
-    RISK -->|High risk / production impact| RB["Rollback"]
+    U -->|Issue| Z["Diagnosis"]
+    Z --> RISK{"Fix or recover?"}
+    RISK -->|Fix| FIX["Smallest fix"]
+    RISK -->|Higher risk| RB["Rollback"]
     FIX --> RE["Verify again"]
     RB --> RE
     RE --> U
 ```
 
-The distinction matters:
+### Zero-to-One Bootstrap: prove it before documenting it
 
-- **Known procedure**: inspect and reconcile it, then document it.
-- **Unknown procedure**: make the first deployment genuinely work, then document the proven result.
+For a project with no trustworthy deployment history, the Agent does not invent a polished `DEPLOYMENT.md` first.
 
-The project does not require an unfamiliar application to begin with a polished-looking `DEPLOYMENT.md` that has never actually been tested.
+It:
 
-See [Deployment Runbook](./docs/deployment-runbook.md) for the full behavior model.
+1. inspects the local project for stack, runtime, entry point, artifacts, configuration, external services, ports, and persistence;
+2. infers the runtime payload instead of blindly copying the whole repository;
+3. inspects the bound server for OS, architecture, runtimes, writable paths, occupied ports, service managers, permissions, and disk space;
+4. discovers facts itself and asks the user only for unresolved preferences or business decisions;
+5. works through a provisional **Bootstrap Plan**;
+6. diagnoses failures from stderr, logs, process state, and ports, then applies the smallest evidence-backed correction;
+7. explicitly states when the target cannot safely run the project instead of escalating server-wide changes just to avoid failure;
+8. captures the **actual successful path** into `DEPLOYMENT.md` only after the first deployment is technically stable.
 
-## Zero-to-one bootstrap for an unfamiliar project
+See [Project Deployment Runbook](./docs/deployment-runbook.md) for the full model.
 
-When the user only has a local project and asks the Agent to deploy it to the currently linked server, but there is no trustworthy deployment procedure yet, the Agent enters the Bootstrap path.
+---
 
-### 1. Discover the local project first
+## Runbook → automation, not a black box first
 
-The Agent should inspect the real LOCAL Workspace and determine, where possible:
+`DEPLOYMENT.md` is the complete human-readable operational knowledge base. A documented command does **not** imply that the user wants it automated.
 
-- project type, language, and main stack;
-- dependency manager, build entry point, and runtime entry point;
-- runtime and version requirements;
-- build outputs / deployment artifacts;
-- runtime code, static assets, templates, and configuration;
-- environment variables and external services such as databases, Redis, or MQ;
-- native / OS / CPU architecture requirements;
-- migrations, persistent directories, ports, and health endpoints.
-
-The goal is not to blindly copy the whole repository. The Agent should distinguish:
-
-```text
-BUILD ONLY           development / build-time material
-RUNTIME PAYLOAD      what the server actually needs
-EXTERNAL / MANAGED   maintained separately by the server or another system
-PERSISTENT           must survive releases
-UNKNOWN              not safe to exclude yet
-```
-
-### 2. Discover the target server
-
-Only the current conversation-bound SSH target is inspected. Relevant facts include:
-
-- OS / CPU architecture;
-- installed runtimes and versions;
-- Docker / systemd / PM2 / Supervisor or other process models;
-- current user, permissions, and writable directories;
-- disk space;
-- existing services and occupied ports;
-- existing application directories;
-- log locations;
-- unrelated workloads that must not be overwritten or stopped.
-
-User-specified directories, ports, environments, or service models are treated as requirements to validate. If the user has not specified them, the Agent proposes a small number of reasonable options from the actual server rather than silently choosing an arbitrary path.
-
-### 3. Confirm progressively instead of asking a giant questionnaire
-
-Bootstrap should alternate inspection with short decisions:
-
-```text
-Agent inspects what it can
-    ↓
-A real user decision appears
-    ↓
-Ask only that decision
-    ↓
-User confirms or adjusts it
-    ↓
-Continue discovery / execution
-```
-
-Facts that can be discovered from the project or server should not be pushed back to the user as questions. User input is reserved for preferences, business constraints, and risk decisions.
-
-### 4. Keep a provisional Bootstrap Plan
-
-Before the first deployment is proven, the plan is intentionally provisional:
-
-```text
-LOCAL      current local preparation
-TRANSFER   what will be transferred
-REMOTE     current release / startup approach
-VERIFY     success criteria for this attempt
-RECOVERY   how to back out or stop impact from growing
-```
-
-Before meaningful mutations, the Agent should show the current plan, the next command or transfer, the expected result, and the impact. Material changes to destination, runtime strategy, service model, or other major assumptions require renewed confirmation.
-
-### 5. Attempt, inspect logs, and debug from evidence
-
-A failed first start is not the end of the workflow. The Agent should diagnose from concrete evidence:
-
-```text
-execute
- ↓
-exit code / stderr / logs
- ↓
-process / service / port / health
- ↓
-identify the most likely cause
- ↓
-propose the smallest corrective change
- ↓
-confirm when necessary
- ↓
-retry
-```
-
-The Agent should not randomly cycle through commands merely to make the application appear to start, and should not make broad server changes without evidence.
-
-### 6. Explicitly admit when the server cannot safely run the project
-
-If deployment is blocked by constraints that cannot safely be resolved inside the approved scope—for example incompatible OS/CPU/runtime, missing required infrastructure or secrets, insufficient privileges, impossible network/port constraints, unsupported native dependencies, inadequate resources, or changes that would require invasive production modifications—the Agent should stop and say so clearly.
-
-It should report the blocker, the evidence, what has already been proven, and realistic next options. It must not hide fatal logs or claim success to avoid admitting that the target is currently not viable.
-
-### 7. Only capture DEPLOYMENT.md after the first real success
-
-A first technical baseline exists only when the process/service remains up, required ports or health checks pass where applicable, and recent logs do not show blocking startup failures.
-
-The Agent then summarizes the **actual path that worked** and asks the user whether that result should become the deployment baseline. The resulting `DEPLOYMENT.md` should record:
-
-- the runtime/version actually used;
-- the real transfer payload;
-- the remote location;
-- configuration and persistence assumptions;
-- start / stop / restart behavior;
-- verification;
-- recovery / rollback;
-- useful known issues.
-
-Failed dead-end experiments should not become normal deployment steps.
-
-## From Runbook to automation: not every command belongs in a script
-
-`DEPLOYMENT.md` is the complete operational knowledge base, but **a documented command does not imply that the user wants it automated**.
-
-| Stage | Goal |
-| --- | --- |
-| 0. Bootstrap (optional) | When no trusted procedure exists, discover and make the first deployment work |
-| 1. Runbook | Capture proven deployment knowledge in a readable, reviewable `DEPLOYMENT.md` |
-| 2. User validation | The operator uses it, adjusts it, and explicitly considers it stable |
-| 3. Habit interview | Decide which steps are automated, manual, external hand-offs, or outside the normal run |
-| 4. One-click automation | Automate only the subset the user actually wants automated |
-| 5. Agent closed loop | Execute, verify, hand off, diagnose, and recover |
-
-Before scripting, the Agent builds an automation coverage map:
+Before generating a script, the Agent maps each step to:
 
 ```text
 AUTOMATE             → include in the script
-KEEP MANUAL          → keep as an operator action
-EXTERNAL / HAND-OFF  → handled by another tool or process
-NOT IN NORMAL RUN    → retained in the Runbook, omitted from the normal one-click path
+KEEP MANUAL          → keep as an operator step
+EXTERNAL / HAND-OFF  → handled by another tool / process
+NOT IN NORMAL RUN    → keep in the Runbook, omit from the normal one-click path
 ```
 
-The goal is not maximum automation. The goal is **automation that matches how the operator really works**.
+A final script may automate only 30% of the Runbook if that is what matches the operator's real workflow.
 
-## Mature closed-loop delivery
+---
 
-Once the Runbook, automation boundary, and script entry point have been validated in real use, the Agent moves from “command generator” to “release operator.”
+## Closed-loop delivery
 
-A mature deployment should, where possible:
+Once the Runbook, automation boundary, and script have all been validated in real use, the Agent moves from command generator to release operator:
 
-1. resolve the exact release artifact/version and environment;
-2. execute inside the approved LOCAL / REMOTE boundary;
-3. independently verify process, port, health, and logs instead of trusting the script exit code;
-4. summarize the real change set when reliable Git/Workspace evidence exists;
-5. recommend focused user tests based on those changes;
-6. close the release when user acceptance is healthy;
-7. enter logs/state/change-set diagnosis when the user reports an issue;
-8. prioritize recovery as risk grows and let the user choose further diagnosis, rollback commands, or Agent-executed rollback;
-9. verify again after a fix or rollback before declaring recovery.
+```text
+Resolve this release
+      ↓
+Run validated automation
+      ↓
+Independently verify process / port / health / logs
+      ↓
+Summarize evidence-backed changed areas
+      ↓
+Tell the user what business behavior to test
+      ↓
+User acceptance
+  ↙         ↘
+healthy      issue
+  ↓            ↓
+done      diagnose / fix / rollback
+               ↓
+            verify again
+```
 
-## Core capabilities
+A zero exit code is not deployment success; a successful rollback command is not recovery. Both require independent verification.
 
-| Capability | What it does |
-| --- | --- |
-| Better Sidebar | Internally integrates the right-side workbench and Files / Editor / Terminal / Browser surfaces |
-| SSH Host & Terminal | Reuses `@linxin666/dsh-ssh` host management, Web Terminal, SFTP, and tunnels |
-| Remote Workspace | Reuses `dsh-rw` so Read / Write / Edit / Glob / Grep / Bash can transparently operate a remote Workspace |
-| Linked SSH | Lets a local source Workspace bind one session-scoped SSH target for local development + remote deployment |
-| SSH Files | Remote tree, editor, preview, multi-select, upload/download, inline rename, directory creation, and delete |
-| Vision / OCR | Reads remote images directly for visual analysis; text-only flows can use system OCR where supported |
-| Zero-to-One Bootstrap | Discovers an unfamiliar LOCAL project and REMOTE target, confirms requirements, attempts and diagnoses deployment, then captures the working baseline |
-| Deployment Runbook | One project-owned `DEPLOYMENT.md` covering LOCAL / TRANSFER / REMOTE / VERIFY / ROLLBACK |
-| Automation Maturity | Validates the Runbook, interviews user habits, defines coverage, then creates automation |
-| Closed-loop Delivery | Agent executes validated automation, verifies the service, recommends tests, accepts feedback, diagnoses, and rolls back when appropriate |
-| Session Safety | One SSH target per conversation; high-risk actions still use Harness-native approvals |
+---
 
 ## Architecture
 
 ```text
 One top-level install: dsh-ssh-files-sidebar
 │
-├─ dsh-better-sidebar (integrated)
-│  ├─ right-side workbench
-│  ├─ Files / Editor / Terminal / Browser
-│  └─ /sidebar/* host routes + client shell
+├─ dsh-better-sidebar
+│  └─ workbench / Files / Editor / Terminal / Browser
 │
-├─ @linxin666/dsh-ssh (integrated)
-│  ├─ ~/.dsh/dsh-ssh.json   ← single SSH source of truth
-│  ├─ Host UI / Web Terminal / SFTP / Tunnel
-│  └─ SSH engine / APIs
+├─ @linxin666/dsh-ssh
+│  └─ SSH Host / Web Terminal / SFTP / Tunnel / Engine
 │
-├─ dsh-rw (integrated)
-│  ├─ Local / Remote SSH Workspace
-│  └─ Read / Write / Edit / Glob / Grep / Bash remote shim
+├─ dsh-rw
+│  └─ Local / Remote Workspace + Read/Write/Edit/Glob/Grep/Bash shim
 │
-├─ SSH Files
-│  ├─ remote file tree + CodeMirror
-│  ├─ image / PDF / HTML / archive preview
-│  ├─ multi-select / upload / download / rename / delete
-│  └─ per-session expansion memory
-│
-├─ Linked SSH Agent Tools
-│  ├─ session-bound SSH operations
+├─ SSH Files + Linked SSH
+│  ├─ remote tree / editor / preview / transfer
+│  ├─ session-bound SSH tools
 │  ├─ remote vision
 │  └─ OCR fallback
 │
 └─ Deployment Layer
-   ├─ zero-to-one bootstrap discovery
-   ├─ provisional Bootstrap Plan
+   ├─ zero-to-one Bootstrap discovery
+   ├─ Bootstrap Plan
    ├─ DEPLOYMENT.md Runbook
-   ├─ command transparency / approvals
    ├─ automation coverage interview
+   ├─ one-click automation
    └─ autonomous deploy → verify → UAT → diagnose / rollback
 ```
 
-## Recommended usage
+---
 
-### 1. Local source Workspace + Linked SSH
+## Safety boundaries
 
-Recommended for development and deployment:
+- one conversation operates one SSH target;
+- Remote Workspace takes precedence, otherwise Linked SSH is used;
+- `DEPLOYMENT.md` `target-ssh` must match the current session lock;
+- high-risk actions still use Harness-native approvals;
+- database restore/migration, recursive deletion, system packages, firewall, disk, and host reboot do not become implicitly authorized by a Runbook;
+- unfamiliar-project Bootstrap does not silently change global runtimes, firewall, reverse proxy, databases, or unrelated services just to make a deployment succeed;
+- production incidents do not silently auto-rollback unless the user has explicitly approved that policy and its triggers.
 
-```text
-LOCAL Workspace (real source tree)
-        +
-Conversation Linked SSH (single target server)
-        +
-Project deployment knowledge (Bootstrap Plan or DEPLOYMENT.md)
-```
+---
 
-Local build, Git, and artifact inspection stay local. Uploads, service management, logs, and health checks are restricted to the SSH target bound to the current conversation.
-
-### 2. Remote SSH Workspace
-
-Use this when you want to browse, edit, search, or run commands directly inside a remote project directory. `dsh-rw` transparently forwards model-facing file tools to the remote Workspace while the remote server remains the source of truth.
-
-> Project-level `DEPLOYMENT.md` still belongs to the real local source Workspace, not the local placeholder directory used for a Remote Workspace.
-
-## Installation
-
-### Requirements
-
-- DeepSeek Harness Web environment
-- Node.js `>= 22.19.0`
-- `pnpm`
-- An accessible SSH host for remote features
-
-### First install
+## Developer install
 
 ```powershell
 git clone https://github.com/qigelunbiya/dsh-ssh-files-sidebar.git
@@ -334,111 +313,43 @@ pnpm install
 pnpm build
 ```
 
-Then, from the DeepSeek Harness source directory:
+From a Harness source checkout:
 
 ```powershell
 pnpm dsh plugin --profile web add link:E:/path/to/dsh-ssh-files-sidebar
 pnpm dsh web
 ```
 
-> Current versions need only one top-level `dsh-ssh-files-sidebar` loader row. `dsh-better-sidebar`, `@linxin666/dsh-ssh`, and `dsh-rw` are composed internally.
+Only one top-level `dsh-ssh-files-sidebar` loader row is required. Do not mount standalone `dsh-better-sidebar`, `@linxin666/dsh-ssh`, or `dsh-rw` rows beside it.
 
-## Upgrading from older versions
+---
+
+## Updating
+
+Release users can reinstall the newest prebuilt package:
 
 ```powershell
-cd E:\path\to\dsh-ssh-files-sidebar
+dsh plugin --profile web remove dsh-ssh-files-sidebar
+dsh plugin --profile web add https://github.com/qigelunbiya/dsh-ssh-files-sidebar/releases/latest/download/dsh-ssh-files-sidebar.tgz
+```
+
+Source developers:
+
+```powershell
 git pull
 pnpm install
 pnpm build
 ```
 
-If the profile still contains old standalone integration rows, remove them to avoid duplicated routes, UI, or shims:
+---
 
-```powershell
-cd E:\path\to\deepseek-harness
+## Documentation
 
-pnpm dsh plugin --profile web remove dsh-better-sidebar
-pnpm dsh plugin --profile web remove @linxin666/dsh-ssh
-pnpm dsh plugin --profile web remove dsh-rw
-pnpm dsh plugin --profile web add link:E:/path/to/dsh-ssh-files-sidebar
-pnpm dsh web
-```
-
-Missing entries can be ignored. After upgrading, a browser hard refresh (`Ctrl + Shift + R`) is recommended.
-
-## SSH configuration and safety boundaries
-
-The only SSH configuration source is:
-
-```text
-~/.dsh/dsh-ssh.json
-```
-
-Safety boundaries:
-
-- one conversation can operate only one SSH target;
-- Remote Workspace metadata takes precedence, otherwise the header Linked SSH binding is used;
-- the Agent does not receive a generic multi-host SSH surface for free host enumeration/switching;
-- `DEPLOYMENT.md` `target-ssh` must match the current session lock;
-- Bootstrap must not overwrite or stop unrelated applications merely to find a convenient deployment location;
-- database restore, recursive deletion, system packages/firewall/disk/host reboot, and similar high-risk operations continue to use Harness-native approvals;
-- production incidents do not silently auto-rollback unless the Runbook/automation policy explicitly defines and the user has approved that behavior;
-- if the current server cannot safely run the project within the approved scope, the Agent should stop and report the blocker rather than expanding the blast radius.
-
-## SSH Files
-
-### Shortcuts
-
-| Action | Shortcut |
-| --- | --- |
-| Toggle item selection | `Ctrl/Cmd + Click` |
-| Range selection | `Shift + Click` |
-| Select visible items | `Ctrl/Cmd + A` |
-| Inline rename | `F2` |
-| Delete selection | `Delete` |
-| Save editor | `Ctrl/Cmd + S` |
-| Search / replace | `Ctrl/Cmd + F` |
-
-### Preview and editing
-
-- Text: CodeMirror with common language highlighting, line numbers, search/replace, folding, and remote save.
-- HTML: source / sandbox preview switching.
-- Images: PNG / JPG / JPEG / GIF / WebP / BMP / ICO / AVIF.
-- PDF: embedded browser preview.
-- Archives: TAR / TGZ / TAR.GZ / TAR.BZ2 / TAR.XZ / ZIP / GZ / BZ2 / XZ / 7Z / RAR; exact support depends on commands available on the remote host.
-
-Automatic text preview defaults to 8 MB; image/PDF preview defaults to 64 MB. Larger files can still be downloaded.
-
-## Deployment Runbook
-
-Each real local source project can own a:
-
-```text
-DEPLOYMENT.md
-```
-
-Recommended structure:
-
-```text
-LOCAL      local checks / build / artifacts
-TRANSFER   local → current SSH target
-REMOTE     release / service management
-VERIFY     process / port / health / logs
-ROLLBACK   restore a stable state
-```
-
-Runbooks may use variables, pipes, `&&`, conditions, loops, command substitution, and multi-line PowerShell/Bash blocks. The requirement is that the **real operational logic remains visible and reviewable**.
-
-If the project has no trusted deployment procedure yet, do not fabricate a “stable Runbook” first. Bootstrap the deployment, prove a real working path, then capture it.
-
-More details:
-
-- [Project Deployment Runbook](./docs/deployment-runbook.md)
+- [Deployment Runbook: zero-to-one → Runbook → automation → closed loop](./docs/deployment-runbook.md)
 - [Deployment Agent design draft (Chinese)](./docs/deployment-agent-design.zh.md)
+- [Distribution / discoverability checklist](./docs/distribution.md)
 
 ## Upstream projects and acknowledgements
-
-This plugin composes the following projects into one top-level installation:
 
 - [`dsh-better-sidebar`](https://github.com/omdsh-dev/DSH-better-sidebar) — MIT
 - [`@linxin666/dsh-ssh`](https://github.com/DamonKoy/dsh-web-ui) — Apache-2.0
