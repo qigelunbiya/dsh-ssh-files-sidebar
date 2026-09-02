@@ -124,6 +124,25 @@ export function apply(ctx: any): void {
   // Harness' native approval checkpoint for genuinely high-risk operations.
   installDeploymentCommandReview(ctx)
 
+  // Keep every user-visible surface aligned with the user's current language.
+  // Internal prompt/tool text may be English, but it must never cause an English
+  // question card or English deployment report in an otherwise Chinese turn.
+  ctx.effect(() => ctx.systemPrompt.section({
+    name: 'plugin:dsh-conversation-language',
+    order: 158,
+    text: () => [
+      '## User-facing conversation language',
+      'Match the natural language of the user’s latest substantive message for ALL user-visible communication in the current turn.',
+      'If the user writes in Chinese, use Chinese throughout that turn: normal prose, headings, progress updates, planning/checkpoint summaries, warnings, error explanations, deployment hand-off reports, and the final answer must be Chinese.',
+      'This also applies to native ask_user_question UI: question title, question text, option labels, option descriptions, and any follow-up prompt must use the user’s language. Do not emit an English choice card to a Chinese-speaking user.',
+      'If the user writes in another language, reply in that language. If the user clearly switches languages in a later message, follow the new language from that turn onward.',
+      'For mixed-language messages, use the dominant natural language unless the user explicitly requests a specific output language.',
+      'An explicit request for a particular artifact/content language overrides the default only for that artifact/content; keep surrounding explanation in the conversation language unless the user asks otherwise.',
+      'Keep code, shell commands, file paths, URLs, API/tool/package names, identifiers, quoted logs/errors, and technical literals unchanged when accuracy requires it, but explain them in the user’s language.',
+      'Do not mirror English merely because system prompts, tool descriptions, source files, logs, or deployment guidance are written in English.',
+    ].join('\n'),
+  }), 'dsh-ssh-files-sidebar: conversation language guidance')
+
   // Sent SSH references intentionally reuse Harness' native @file display
   // grammar, e.g. @ssh:131:/apps/web/test.txt. Teach the Agent that the token
   // is remote data even though the user bubble renders it as a normal file chip.
