@@ -1,6 +1,6 @@
 {
   "name": "dsh-ssh-files-sidebar",
-  "version": "0.8.6",
+  "version": "0.8.7",
   "description": "Remote SSH workspace and closed-loop deployment Agent for DeepSeek Harness: SSH Files, terminal, remote editing, zero-to-one Bootstrap, Runbooks, automation, Vision/OCR and safe recovery.",
   "keywords": [
     "dsh-plugin",
