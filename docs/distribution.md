@@ -114,6 +114,14 @@ After the `dsh-plugin` topic is present and the release install works:
 - submit it to curated DSH / awesome lists where manual submission is supported;
 - share a short demo in DeepSeek Harness Discussions / Discord / relevant Chinese communities.
 
+The primary curated list `awesome-dsh-plugin/awesome-dsh-plugin` accepts one YAML file per plugin under `data/plugins/`. A ready-to-copy entry for this project is maintained at [`docs/awesome-dsh-plugin-submission.yml`](./awesome-dsh-plugin-submission.yml). Its target filename in that repository is:
+
+```text
+data/plugins/qigelunbiya__dsh-ssh-files-sidebar.yml
+```
+
+Submit that entry only after the repository has the required `dsh-plugin` topic. Keep its description factual; the catalog maintainers verify claims against source code.
+
 A good announcement should lead with the user problem and a demo, not with internal architecture.
 
 Suggested title:
