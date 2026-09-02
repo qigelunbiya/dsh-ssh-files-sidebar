@@ -26,14 +26,14 @@ function argumentsOf(exec: any): unknown {
 }
 
 function mentionsDeploymentRunbook(exec: any): boolean {
-  return collectStrings(argumentsOf(exec)).some(value => /(^|[\\/])DEPLOYMENT\.md(?:$|[\s"'`])/i.test(value) || /\bDEPLOYMENT\.md\b/i.test(value))
+  return collectStrings(argumentsOf(exec)).some(value => /\bDEPLOYMENT\.md\b/i.test(value))
 }
 
 function shellLooksMutating(exec: any): boolean {
   const text = collectStrings(argumentsOf(exec)).join('\n')
   if (text.trim() === '') return false
   if (exec?.name === 'pwsh') {
-    return /(?:Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content|\bdel\b|\berase\b|\bmove\b|\bcopy\b|>>?|\|\s*Tee-Object)\b?/i.test(text)
+    return /(?:\b(?:Set-Content|Add-Content|Out-File|New-Item|Remove-Item|Move-Item|Copy-Item|Rename-Item|Clear-Content|del|erase|move|copy)\b|>>?|\|\s*Tee-Object\b)/i.test(text)
   }
   if (exec?.name === 'bash') {
     return /(?:\b(?:touch|rm|mv|cp|install|truncate)\b|\bsed\s+-[^\n]*i\b|\btee\b|>>?|\bcat\b[^\n]*>)/i.test(text)
