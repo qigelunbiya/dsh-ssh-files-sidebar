@@ -1,0 +1,6 @@
+url: https://github.com/qigelunbiya/dsh-ssh-files-sidebar
+name: qigelunbiya/dsh-ssh-files-sidebar
+category: remote
+description:
+  en: Remote SSH workspace for DeepSeek Harness with file editing, terminal access, session-bound SSH tools, zero-to-one deployment bootstrap, deployment runbooks, and closed-loop release verification and recovery.
+  zh: 面向 DeepSeek Harness 的 Remote SSH 工作区，提供远程文件编辑、终端、会话绑定 SSH 工具、从零部署 Bootstrap、部署 Runbook，以及发布验证与恢复闭环。
