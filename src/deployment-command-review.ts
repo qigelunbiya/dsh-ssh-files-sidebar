@@ -11,12 +11,13 @@ function objectString(value: unknown, key: string): string | null {
 /**
  * Deployment command transparency + maturity guidance.
  *
- * 0.8.3 adds a workflow-habit interview before automation. A validated
- * DEPLOYMENT.md documents the whole operational procedure, but that does NOT
- * mean every documented step belongs in a one-click script. The Agent must
- * first learn how the operator actually performs each stage, including manual
- * hand-offs and actions performed outside DSH, then automate only the subset
- * the user explicitly wants automated.
+ * 0.8.4 extends the maturity path with a closed-loop delivery stage. Once a
+ * Runbook and its automation entry point are both user-validated, the Agent
+ * should stop behaving like a command generator and act as an operator:
+ * inspect the release inputs, run the approved automation itself, verify the
+ * remote service, summarize the evidence-backed change set and test focus,
+ * accept user validation feedback, diagnose regressions, and offer/perform a
+ * reviewed rollback when needed.
  */
 export function installDeploymentCommandReview(ctx: any): void {
   ctx.on('tools/pre-execute', async (exec: any, next: () => Promise<any>) => {
@@ -38,8 +39,8 @@ export function installDeploymentCommandReview(ctx: any): void {
     name: 'plugin:dsh-deployment-command-transparency',
     order: 157,
     text: () => [
-      '## Deployment workflow maturity (0.8.3)',
-      'Treat deployment automation as a maturity path: visible Runbook first, user-validated Runbook second, workflow-habit interview third, optional one-click automation last.',
+      '## Deployment workflow maturity (0.8.4)',
+      'Treat deployment automation as a maturity path: visible Runbook first, user-validated Runbook second, workflow-habit interview third, optional one-click automation fourth, Agent-operated closed loop last.',
       '',
       '### Stage 1 — Runbook first',
       'When a project has no proven deployment workflow yet, the first deliverable MUST be an operator-visible DEPLOYMENT.md. Do not make a newly generated deploy.ps1/deploy.sh/restart.sh/rollback script the primary interface and do not default to one-click deployment.',
@@ -68,6 +69,20 @@ export function installDeploymentCommandReview(ctx: any): void {
       'Before writing or running the generated script, show its path, invocation, inputs, automated Runbook coverage, manual/external hand-offs, retained confirmation checkpoints, failure/rollback behavior, and the actual script content or a sufficiently complete reviewable diff. Ask for explicit confirmation.',
       'Keep DEPLOYMENT.md as the human-readable source of truth even after a script exists. Document the script entry point and its automation boundary. If the deployment procedure or the user’s operating habits change materially, treat the script as potentially stale: update/validate the Runbook or coverage map first, then regenerate or update automation.',
       'A project-maintained script that already existed before this workflow is not considered a newly hidden black box. It may be used after inspecting what it does and reconciling it with the current Runbook, environment, and the user’s actual operating habits.',
+      '',
+      '### Stage 5 — Agent-operated closed-loop delivery',
+      'After the one-click entry point itself has been reviewed and successfully validated, a normal user request to deploy/publish/update this project should be handled as an operational task, not as another command-copying exercise. When the required inputs and approvals are already known, use the available LOCAL Workspace tools and the current session-bound SSH tools to perform the approved workflow yourself. Do not make the user manually run a script that the Agent is capable of running safely.',
+      'Honor the confirmed automation coverage map exactly. Do not absorb KEEP MANUAL or EXTERNAL/HAND-OFF stages merely because autonomous execution is now possible. Pause only at the hand-offs/checkpoints the user chose, when a required input is genuinely missing, or when a new high-risk/unreviewed action appears.',
+      'Before each autonomous deployment, perform lightweight preflight and resolve the exact release inputs. If version-control evidence is available in the LOCAL Workspace, inspect relevant status/diff/log/commit information so you can later explain what changed. If change information cannot be established reliably, say so; never invent a release summary.',
+      'Execute the validated automation entry point on the execution plane it was designed for. Observe its exit status/output and then independently verify the deployed service instead of trusting script success alone.',
+      'Post-deploy verification should use the strongest checks available from the Runbook/environment: expected process/service state, listening ports, health/HTTP checks, deployed artifact/version identity when observable, and recent logs for startup/fatal/error patterns. Run safe smoke checks from the Runbook when they exist.',
+      'After self-verification, give the user a compact deployment hand-off report containing: what was deployed, whether the service currently looks healthy, any warnings, an evidence-backed summary of the main changed areas when discoverable, and the specific user-facing/business functions worth testing. Derive test focus from the actual change set and project structure when possible rather than emitting a generic checklist.',
+      'The Agent’s technical verification does not replace user acceptance testing. Ask the user to test the suggested functions and report whether behavior is normal. If the user reports success, close the deployment loop with a short final status; do not keep changing the environment unnecessarily.',
+      'If the user reports an abnormality, enter a diagnosis loop before making broad changes: collect the exact symptom, reproduce with safe checks when possible, inspect current service/process/port/health/log state, correlate the symptom with the local change set and deployed version, and distinguish deployment/infrastructure failure from application regression or an unrelated environment/input problem.',
+      'Prefer evidence gathering before rollback when the service is still usable and the investigation is low risk. If the situation is severe, production-impacting, unclear, or further diagnosis would increase risk, prioritize recovery. Present the validated rollback/recovery commands or script, explain what will be restored and what evidence may be lost, and use `ask_user_question` to offer choices such as “继续排查”, “给我回滚命令”, and “由你执行回滚”.',
+      'Do not silently auto-rollback production merely because a user says “有问题”. Automatic rollback is allowed only when the validated Runbook/automation explicitly defines the trigger and the user has previously approved that behavior. Otherwise, rollback execution requires the user’s explicit choice and remains subject to native approval for high-risk actions.',
+      'After any rollback, independently verify the restored service/process/port/health/log state and tell the user which version/state is now active. A rollback is not complete just because the rollback command returned success.',
+      'The closed loop is: inspect release -> execute approved automation -> self-verify -> summarize changes and test focus -> user acceptance -> success closeout OR diagnose -> fix/rollback decision -> verify recovery -> closeout.',
       '',
       '### Execution and approvals',
       'If the user chooses execution, run only commands/blocks or scripts that were already shown and approved, in order, and inspect results at logical checkpoints. If a replacement command becomes necessary, stop before the new mutation, show the replacement, and confirm again.',
