@@ -1,100 +1,182 @@
+<div align="center">
+
 # dsh-ssh-files-sidebar
 
-一个面向 DeepSeek Harness 的一体化 Remote SSH 插件层：把 `dsh-better-sidebar` 的右侧工作台、`@linxin666/dsh-ssh` 的 SSH 运维能力、`dsh-rw` 的远程工作区/原生工具 Shim，以及本项目自己的 SSH Files / 部署 Runbook 组合到同一套体验里。
+**DeepSeek Harness 的一体化 Remote SSH 工作区与闭环部署 Agent**
 
-> 0.8.0 起，`dsh-better-sidebar` 已经和 SSH / Remote Workspace 一样由本项目内部挂载。Profile **不再需要单独启用 `dsh-better-sidebar`**；只启动 `dsh-ssh-files-sidebar` 即可获得右侧工作台和 SSH Files。
+把右侧工作台、SSH 主机与终端、远程 Workspace、SSH Files、远程图像/OCR、部署 Runbook、自动化脚本和发布闭环整合进一个插件。
 
-> 0.4.0 起，用户只维护一份 SSH 主机配置：`~/.dsh/dsh-ssh.json`。不再需要同时在 `@linxin666/dsh-ssh` 和 `dsh-rw` 各配一遍服务器。
+[![build](https://github.com/qigelunbiya/dsh-ssh-files-sidebar/actions/workflows/build.yml/badge.svg)](https://github.com/qigelunbiya/dsh-ssh-files-sidebar/actions/workflows/build.yml)
+[![version](https://img.shields.io/github/package-json/v/qigelunbiya/dsh-ssh-files-sidebar)](./package.json)
+[![license](https://img.shields.io/github/license/qigelunbiya/dsh-ssh-files-sidebar)](./LICENSE)
 
-## 0.8.0 主要变化
+**简体中文** · [English](./README.en.md)
 
-- `dsh-better-sidebar@0.16.1` 从外部 peer 改为本项目的内部运行依赖。
-- Host 端直接挂载 Better Sidebar 的 `/sidebar/*` 路由、终端/文件 API 和相关能力。
-- Browser 端把 Better Sidebar client source 编译进本项目自己的 `client.js`，并在注册 `SSH Files` 之前先提供 `ctx.betterSidebar`。
-- 本项目不再声明 `betterSidebar` 外部服务依赖，因此关闭/卸载独立 `dsh-better-sidebar` 后不会再出现 `pending (waiting for service: betterSidebar)`。
-- Better Sidebar、SSH、Remote Workspace 都只需要一个顶层 loader row：`dsh-ssh-files-sidebar`。
-- 为 Better Sidebar 的 client core 补齐 `sessions / workspaces / modules` 等注入以及普通 CSS 构建支持。
+</div>
 
-### 从 0.7.x 升级到 0.8.0
+---
 
-先更新和构建本项目：
+## 项目定位
 
-```powershell
-cd E:\fangzeming\deepseekHarness\dsh-ssh-files-sidebar
+`dsh-ssh-files-sidebar` 不是单纯的文件侧栏，也不是只会执行几条 SSH 命令的工具。它把 DeepSeek Harness 中和远程开发、服务器运维、项目发布相关的能力收敛到同一条工作流里：
 
-git pull
-pnpm install
-pnpm build
+- **一个顶层插件**：内部集成 `dsh-better-sidebar`、`@linxin666/dsh-ssh` 和 `dsh-rw`。
+- **一份 SSH 配置**：主机与凭据统一使用 `~/.dsh/dsh-ssh.json`。
+- **本地 + 远程双执行平面**：源码、构建与本地产物留在 LOCAL Workspace；服务器操作锁定到当前会话唯一 SSH。
+- **VS Code 风格 SSH Files**：远程浏览、编辑、预览、上传、下载、重命名、删除与多选。
+- **Agent 可直接理解远程内容**：支持远程图片视觉分析，以及 Windows/macOS 上的本地 OCR 路径。
+- **部署从“文档”逐步成熟到“闭环”**：先 Runbook，再自动化，再由 Agent 自主发布、自检、交接、诊断和恢复。
+
+> 核心原则：**先把真实流程做透明、做稳定，再逐步提高自动化程度。**
+
+## 部署闭环
+
+下面这张图是项目当前部署能力的核心设计：
+
+```mermaid
+flowchart TD
+    A["DEPLOYMENT.md<br/>可审查的部署 Runbook"] --> B["用户实际使用并确认流程稳定"]
+    B --> C["访谈真实操作习惯<br/>确定自动化边界"]
+    C --> D["生成并验证一键脚本"]
+    D --> E["Agent 自主执行发布"]
+    E --> F["技术自检<br/>进程 / 端口 / Health / 日志"]
+    F --> G["分析本次 Change Set<br/>给出重点测试功能"]
+    G --> H{"用户业务验收"}
+    H -->|正常| I["完成"]
+    H -->|异常| J["日志 / 状态 / Change Set 诊断"]
+    J --> K{"风险与恢复决策"}
+    K -->|可安全定位| L["修复"]
+    K -->|风险较高 / 生产影响| M["回滚"]
+    L --> N["再次验证"]
+    M --> N
+    N --> O{"业务是否恢复"}
+    O -->|是| I
+    O -->|否| J
 ```
 
-然后把 Profile 中**单独安装的 Better Sidebar 删除**，再同步一次本项目的 `link:`：
+这意味着成熟后的正常发布不再是“Agent 给你一串命令，然后你自己去执行”，而是：
 
-```powershell
-cd E:\fangzeming\deepseekHarness\deepseek-harness
+1. Agent 确认本次发布输入和环境状态；
+2. 在已确认的自动化边界内自己执行；
+3. 独立检查服务状态，而不是只相信脚本退出码；
+4. 如果能从 Git / Workspace 可靠获取变更，说明本次主要修改区域；
+5. 基于真实变更告诉用户重点测试哪些业务功能；
+6. 用户验收正常则结束；
+7. 用户反馈异常则进入诊断；
+8. 风险较高时优先给出恢复方案，并让用户决定继续排查、查看回滚命令或由 Agent 执行回滚；
+9. 修复或回滚后再次验证，直到闭环。
 
-pnpm dsh plugin --profile web remove dsh-better-sidebar
-pnpm dsh plugin --profile web add link:E:/fangzeming/deepseekHarness/dsh-ssh-files-sidebar
-pnpm dsh web
+完整规则见 [部署 Runbook 文档](./docs/deployment-runbook.md)。
+
+## 自动化成熟度：不是所有命令都应该进脚本
+
+`DEPLOYMENT.md` 是完整的部署知识库，但 **Runbook 中存在一条命令，不代表用户希望脚本执行它**。
+
+项目把部署自动化分成四个前置阶段和一个闭环阶段：
+
+| 阶段 | 目标 |
+| --- | --- |
+| 1. Runbook | 用可读、可审查的 `DEPLOYMENT.md` 整理真实流程 |
+| 2. 用户验证 | 用户实际使用、调整，并明确确认流程已经稳定 |
+| 3. 使用习惯访谈 | 确定哪些步骤自动、手动、外部交接或不属于日常流程 |
+| 4. 一键脚本 | 只自动化用户明确需要自动执行的部分 |
+| 5. Agent 闭环 | Agent 自主执行、自检、交接、诊断与恢复 |
+
+在生成脚本前，Agent 会先形成自动化覆盖表：
+
+```text
+AUTOMATE             → 纳入脚本
+KEEP MANUAL          → 保留人工操作
+EXTERNAL / HAND-OFF  → 由其他工具或流程处理
+NOT IN NORMAL RUN    → Runbook 保留，但不进入日常一键流程
 ```
 
-如果 `remove dsh-better-sidebar` 提示未安装，可以忽略。启动后建议浏览器执行一次 `Ctrl + Shift + R` 硬刷新。
+因此，项目追求的不是“自动化率越高越好”，而是**自动化边界和用户真实习惯一致**。
 
-> 不建议同时挂载独立 `dsh-better-sidebar` 和 0.8.0 的集成版本；两边都会尝试注册同一组 `/sidebar/*` 路由和右侧面板。
+## 核心能力
 
-## 0.4.0 主要变化
-
-- 顶层插件会自动激活 `@linxin666/dsh-ssh`，保留原来的 SSH 主机管理、Web Terminal、SFTP、隧道和 Agent SSH 工具。
-- 内部挂载 `dsh-rw` 的远程 Workspace 路由、`rw_*` 工具和原生工具 Shim，但它读取同一份 `~/.dsh/dsh-ssh.json`。
-- “添加工作区”恢复为明确的 **本机 / 远程 SSH** 两个选项；只有主动选择本机时才会打开 Windows 系统文件夹选择器。
-- `SSH Files` 只对 `dsh-rw` 远程工作区开放；普通本机工作区不会再沿用上一会话的 131 文件树。
-- Git 状态功能和 Git 按钮全部移除。
-- PNG/JPG/GIF/WebP/BMP/ICO/AVIF 图片预览修正 MIME 后再显示。
-- TAR/TGZ/TAR.GZ/TAR.BZ2/TAR.XZ/ZIP/GZ/BZ2/XZ/7Z/RAR 支持查看压缩包目录/元信息；具体格式依赖服务器上的 `tar` / `gzip` / `unzip` / `7z` / `unrar` 等命令。
-- `Ctrl/Cmd + 点击` 增减多选，`Shift + 点击` 范围多选，树获得焦点后 `Ctrl+A` 可选择当前已展开的可见项目。
-- 多选后可批量删除，也可连续触发多个文件下载。
-- 重命名改成文件树中的**原地编辑**，不再弹浏览器 prompt；也支持 `F2`。
-- `Delete` 可删除当前选择。
-- 右键文件/目录继续提供常用文件操作；多选时右键已选中的项目会保留整组选择。
-- CodeMirror 编辑器继续支持语法高亮、行号、搜索替换、`Ctrl+S` 保存。
-- 文件树 / 编辑器高度可拖拽调整，并按 DSH 会话记忆。
-- 每个远程会话继续分别记住上次展开的目录。
+| 能力 | 说明 |
+| --- | --- |
+| Better Sidebar | 内部集成右侧工作台、Files / Editor / Terminal / Browser 等能力 |
+| SSH Host & Terminal | 复用 `@linxin666/dsh-ssh` 的主机管理、Web Terminal、SFTP、Tunnel |
+| Remote Workspace | 复用 `dsh-rw`，让 Read / Write / Edit / Glob / Grep / Bash 能透明操作远程 Workspace |
+| Linked SSH | 本地源码 Workspace 可以绑定一个会话级 SSH，适合本地开发 + 远程发布 |
+| SSH Files | 远程文件树、编辑、预览、多选、上传下载、原地重命名、新建目录和删除 |
+| Vision / OCR | 直接读取远程图片做视觉分析；文本模型可走系统 OCR 回退路径 |
+| Deployment Runbook | 每个本地项目维护自己的 `DEPLOYMENT.md`，记录 LOCAL / TRANSFER / REMOTE / VERIFY / ROLLBACK |
+| Automation Maturity | Runbook 验证后再访谈用户习惯、确定自动化边界、生成脚本 |
+| Closed-loop Delivery | Agent 自主执行已验证流程、技术自检、给出测试重点、接收用户验收、诊断或回滚 |
+| Session Safety | 一个 Conversation 只允许一个 SSH 目标，高风险操作继续走 Harness 原生审批 |
 
 ## 架构
 
 ```text
 一个顶层安装：dsh-ssh-files-sidebar
 │
-├─ dsh-better-sidebar（内部复用）
-│  ├─ 右侧工作台 / Files / Editor / Terminal / Browser
-│  ├─ betterSidebar Tab / Viewer registry
+├─ dsh-better-sidebar（内部集成）
+│  ├─ 右侧工作台
+│  ├─ Files / Editor / Terminal / Browser
 │  └─ /sidebar/* host routes + client shell
 │
-├─ @linxin666/dsh-ssh（内部复用）
-│  ├─ ~/.dsh/dsh-ssh.json   ← 唯一 SSH 主机/凭据配置
-│  ├─ SSH 主机管理 UI
-│  ├─ Web Terminal / SFTP / Tunnel
-│  └─ /api/dsh-ssh/* + ssh_* Agent tools
+├─ @linxin666/dsh-ssh（内部集成）
+│  ├─ ~/.dsh/dsh-ssh.json   ← 唯一 SSH 配置源
+│  ├─ Host UI / Web Terminal / SFTP / Tunnel
+│  └─ SSH engine / APIs
 │
-├─ dsh-rw（内部复用）
-│  ├─ 添加工作区：本机 / 远程 SSH
-│  ├─ ~/.dsh/remote-workspaces/<alias>/<name> 占位 Workspace
-│  ├─ rw_* tools
-│  └─ Read / Write / Edit / Glob / Grep / Bash 透明远程 Shim
+├─ dsh-rw（内部集成）
+│  ├─ 本机 / 远程 SSH Workspace
+│  └─ Read / Write / Edit / Glob / Grep / Bash remote shim
 │
-└─ SSH Files（注册到内部 Better Sidebar）
-   ├─ 远程文件树
-   ├─ CodeMirror 编辑/保存
-   ├─ 图片/PDF/压缩包预览
-   ├─ 多选
-   ├─ 上传/下载
-   ├─ 原地重命名
-   ├─ 新建目录/删除
-   └─ 会话级目录展开记忆
+├─ SSH Files
+│  ├─ 远程文件树 + CodeMirror
+│  ├─ 图片 / PDF / HTML / 压缩包预览
+│  ├─ 多选 / 上传 / 下载 / 重命名 / 删除
+│  └─ 会话级目录展开记忆
+│
+├─ Linked SSH Agent Tools
+│  ├─ session-bound SSH operations
+│  ├─ remote vision
+│  └─ OCR fallback
+│
+└─ Deployment Layer
+   ├─ DEPLOYMENT.md Runbook
+   ├─ command transparency / approvals
+   ├─ automation coverage interview
+   └─ autonomous deploy → verify → UAT → diagnose / rollback
 ```
 
-0.8.0 起，右侧 Better Sidebar、SSH 和远程工作区都由本项目一次安装带入，不需要再维护一个独立的 `dsh-better-sidebar` loader row。
+## 推荐使用方式
 
-## 首次安装
+项目主要支持两种工作模式。
+
+### 1. 本地源码 Workspace + Linked SSH
+
+推荐用于日常开发和部署：
+
+```text
+LOCAL Workspace（真实源码）
+        +
+Conversation Linked SSH（唯一目标服务器）
+        +
+项目根目录 DEPLOYMENT.md
+```
+
+本地构建、Git、产物检查留在本机；上传、服务管理、日志和 Health Check 只作用于当前会话绑定服务器。
+
+### 2. Remote SSH Workspace
+
+适合直接在服务器目录中浏览、编辑、搜索或运行命令。`dsh-rw` 会把模型原生文件工具透明转发到对应远程 Workspace，远程文件仍以服务器为 source of truth，不做本地镜像。
+
+## 安装
+
+### 环境要求
+
+- DeepSeek Harness Web 环境
+- Node.js `>= 22.19.0`
+- `pnpm`
+- 可访问的 SSH 主机（如需远程能力）
+
+### 首次安装
 
 ```powershell
 git clone https://github.com/qigelunbiya/dsh-ssh-files-sidebar.git
@@ -110,126 +192,111 @@ pnpm dsh plugin --profile web add link:E:/你的路径/dsh-ssh-files-sidebar
 pnpm dsh web
 ```
 
-## 从 0.3.x 升级到 0.4.x
+> 当前版本只需要一个顶层 `dsh-ssh-files-sidebar` loader row。`dsh-better-sidebar`、`@linxin666/dsh-ssh` 和 `dsh-rw` 已由本项目内部组合。
 
-0.4.x 已经会自己激活 `@linxin666/dsh-ssh`，并且内部接入 `dsh-rw`。为了避免重复插件 row、重复 API route 或两套 Shim，先把 profile 中**单独安装**的旧条目移除：
+## 从旧版本升级
 
-```powershell
-cd E:\fangzeming\deepseekHarness\deepseek-harness
-
-pnpm dsh plugin --profile web remove @linxin666/dsh-ssh
-pnpm dsh plugin --profile web remove dsh-rw
-```
-
-如果其中某条提示没有安装，可以忽略。
-
-随后更新本项目：
+更新插件：
 
 ```powershell
-cd E:\fangzeming\deepseekHarness\dsh-ssh-files-sidebar
-
+cd E:\你的路径\dsh-ssh-files-sidebar
 git pull
 pnpm install
 pnpm build
 ```
 
-因为 0.4.0 新增了集成依赖，建议让 DSH profile 对 `link:` 再同步一次依赖：
+如果 Profile 里仍然单独存在旧的集成项，建议移除，避免重复路由、重复 UI 或重复 Shim：
 
 ```powershell
-cd E:\fangzeming\deepseekHarness\deepseek-harness
+cd E:\你的路径\deepseek-harness
 
-pnpm dsh plugin --profile web add link:E:/fangzeming/deepseekHarness/dsh-ssh-files-sidebar
+pnpm dsh plugin --profile web remove dsh-better-sidebar
+pnpm dsh plugin --profile web remove @linxin666/dsh-ssh
+pnpm dsh plugin --profile web remove dsh-rw
+pnpm dsh plugin --profile web add link:E:/你的路径/dsh-ssh-files-sidebar
 pnpm dsh web
 ```
 
-浏览器启动后执行一次硬刷新：`Ctrl + Shift + R`。
+未安装的条目如果提示不存在可以忽略。升级后建议浏览器执行一次 `Ctrl + Shift + R` 硬刷新。
 
-> 原来 `@linxin666/dsh-ssh` 保存的 `~/.dsh/dsh-ssh.json` 不需要删除，也不需要重新配置服务器。0.4.0 正是复用这份配置。
+## SSH 配置
 
-## 工作区使用方式
-
-点击“添加工作区”后会出现两个选项：
-
-- **本机**：手动输入本机路径，或点击按钮后再打开 Windows 系统目录选择器。
-- **远程 SSH**：直接读取左侧 SSH 已经配置的主机，选服务器、浏览远程目录并设为 Workspace。
-
-创建远程 Workspace 后，DSH 的会话 cwd 是本机的轻量占位目录，但 Agent 的 `Read/Write/Edit/Glob/Grep/Bash` 会由 dsh-rw Shim 自动转发到对应服务器；远程文件仍以服务器为 source of truth，不做本地镜像。
-
-`SSH Files` 会根据当前会话的远程 Workspace 或 Linked SSH 自动绑定服务器，服务器目标仍然跟随当前 Conversation，不提供独立的第二套主机选择。
-
-## 文件树操作
-
-单选：直接点击。
-
-多选：
-
-```text
-Ctrl/Cmd + 点击   增加/取消一个项目
-Shift + 点击      从锚点到当前项目范围选择
-Ctrl/Cmd + A      选择当前文件树已经展开并可见的项目
-```
-
-快捷键：
-
-```text
-F2       原地重命名
-Delete   删除当前选择
-Ctrl+S   保存编辑文件
-Ctrl+F   CodeMirror 搜索/替换
-```
-
-右键文件：
-
-```text
-打开 / 预览 / 编辑
-下载（多选时下载选中的文件）
-刷新所在目录
-重命名（原地编辑）
-删除（多选时删除选中的项目）
-```
-
-右键目录：
-
-```text
-刷新目录
-上传文件到这里
-新建目录
-重命名（原地编辑）
-删除
-```
-
-文件树空白区域代表远程 `/`，可右键刷新、上传和新建目录。
-
-## 预览和编辑
-
-文本文件：CodeMirror 编辑器，支持常见语言的语法高亮、行号、搜索替换、代码折叠和远程保存。
-
-HTML：可在“源码 / 预览”之间切换；HTML 预览使用 sandbox iframe。
-
-图片：PNG/JPG/JPEG/GIF/WebP/BMP/ICO/AVIF 在侧栏中显示。
-
-PDF：浏览器内嵌预览。
-
-压缩包：不把整个归档解压到浏览器，而是在远程服务器读取目录或压缩信息并显示。常见 `.tar.gz` / `.tgz` 在 Linux 上通常只依赖 `tar`；ZIP/7Z/RAR 若服务器缺对应命令，会显示明确错误，不会修改压缩包。
-
-自动文本预览默认限制 8 MB，图片/PDF 自动预览默认限制 64 MB；超限文件仍可下载。
-
-## SSH 配置与安全
-
-唯一 SSH 配置源是：
+唯一 SSH 配置源：
 
 ```text
 ~/.dsh/dsh-ssh.json
 ```
 
-由内部挂载的 `@linxin666/dsh-ssh` 负责主机管理和原有 SSH UI。远程 Workspace 侧通过兼容适配器读取同一文件，因此不需要再维护 `~/.dsh/dsh-rw.json` 的第二份主机列表。
+不需要再为 Remote Workspace 维护第二份 SSH 密码或主机表。
 
-删除目录会执行远程 `rm -rf -- <path>`，UI 会先要求确认；文件操作权限与当前 SSH 登录用户一致。重命名和新建目录分别通过远程 `mv` / `mkdir` 完成。
+安全边界：
 
-## 上游依赖
+- 一个 Conversation 只操作一个 SSH 目标；
+- Remote Workspace 优先决定目标，否则使用会话顶部 Linked SSH；
+- Agent 不暴露自由枚举/切换多主机的通用 SSH 面；
+- `DEPLOYMENT.md` 的 `target-ssh` 必须与当前 session lock 一致；
+- 数据库恢复、递归删除、系统包/防火墙/磁盘/主机重启等高风险操作继续触发 Harness 原生审批；
+- 除非已经在 Runbook / 自动化策略中明确配置并获得用户认可，否则生产异常不会静默自动回滚。
 
-- `dsh-better-sidebar@0.16.1`：MIT，来源 `omdsh-dev/DSH-better-sidebar`
-- `@linxin666/dsh-ssh`：Apache-2.0，来源 `DamonKoy/dsh-web-ui/packages/dsh-ssh`
-- `dsh-rw`：MIT，来源 `MDR-EX1000/dsh-rw`
+## SSH Files
 
-更完整的归属信息见 `NOTICE`。
+### 常用快捷键
+
+| 操作 | 快捷键 |
+| --- | --- |
+| 多选增减 | `Ctrl/Cmd + 点击` |
+| 范围选择 | `Shift + 点击` |
+| 选择当前可见项 | `Ctrl/Cmd + A` |
+| 原地重命名 | `F2` |
+| 删除选择 | `Delete` |
+| 保存编辑 | `Ctrl/Cmd + S` |
+| 搜索 / 替换 | `Ctrl/Cmd + F` |
+
+### 预览与编辑
+
+- 文本：CodeMirror，支持常见语言高亮、行号、搜索替换、折叠与远程保存。
+- HTML：源码 / sandbox 预览切换。
+- 图片：PNG / JPG / JPEG / GIF / WebP / BMP / ICO / AVIF。
+- PDF：浏览器内嵌预览。
+- 压缩包：TAR / TGZ / TAR.GZ / TAR.BZ2 / TAR.XZ / ZIP / GZ / BZ2 / XZ / 7Z / RAR；具体格式依赖远程服务器已有命令。
+
+默认自动文本预览上限为 8 MB，图片/PDF 自动预览上限为 64 MB；超限文件仍可下载。
+
+## Deployment Runbook
+
+每个真实本地源码项目可以维护自己的：
+
+```text
+DEPLOYMENT.md
+```
+
+建议结构：
+
+```text
+LOCAL      本地检查 / 构建 / 产物
+TRANSFER   本地 → 当前 SSH
+REMOTE     发布 / 服务管理
+VERIFY     进程 / 端口 / Health / 日志
+ROLLBACK   恢复到稳定状态
+```
+
+Runbook 允许变量、管道、`&&`、条件、循环、命令替换和多行 PowerShell/Bash；重点是**真实逻辑必须可见、可审查**。
+
+更多细节：
+
+- [Project Deployment Runbook](./docs/deployment-runbook.md)
+- [部署 Agent 设计草案](./docs/deployment-agent-design.zh.md)
+
+## 上游依赖与致谢
+
+本项目在同一顶层插件中复用以下项目：
+
+- [`dsh-better-sidebar`](https://github.com/omdsh-dev/DSH-better-sidebar) — MIT
+- [`@linxin666/dsh-ssh`](https://github.com/DamonKoy/dsh-web-ui) — Apache-2.0
+- [`dsh-rw`](https://github.com/MDR-EX1000/dsh-rw) — MIT
+
+完整归属信息见 [NOTICE](./NOTICE)。
+
+## License
+
+[MIT](./LICENSE)

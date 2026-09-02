@@ -1,7 +1,20 @@
 {
   "name": "dsh-ssh-files-sidebar",
   "version": "0.8.4",
-  "description": "Integrated DSH Better Sidebar, Remote SSH workspace, Linked SSH, deployment runbooks, SSH operations UI and VSCode-like remote file explorer/editor.",
+  "description": "Integrated Remote SSH workspace and closed-loop deployment agent for DeepSeek Harness, with SSH Files, terminal, runbooks, automation, vision/OCR and session-bound safety.",
+  "keywords": [
+    "deepseek-harness",
+    "remote-ssh",
+    "ssh",
+    "sftp",
+    "remote-workspace",
+    "deployment",
+    "devops",
+    "runbook",
+    "automation",
+    "agent",
+    "codemirror"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -51,6 +64,7 @@
     "src",
     "cordis.patch.yml",
     "README.md",
+    "README.en.md",
     "LICENSE",
     "NOTICE"
   ],
