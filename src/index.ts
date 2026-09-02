@@ -2,6 +2,7 @@ import { apply as applySsh } from '@linxin666/dsh-ssh'
 import { apply as applyBetterSidebar } from 'dsh-better-sidebar'
 import { apply as applyRemoteWorkspace } from 'dsh-rw'
 import { installDeploymentCommandReview } from './deployment-command-review.ts'
+import { installObservedDeploymentRunbook } from './deployment-runbook-observed.ts'
 import { installDeploymentRunbook } from './deployment-runbook.ts'
 import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
@@ -117,6 +118,12 @@ export function apply(ctx: any): void {
   // runbook's target-ssh must match the conversation's existing SSH lock. This
   // keeps build/package local, transfer explicit, and service operations remote.
   installDeploymentRunbook(ctx, linkedStore)
+
+  // 0.8.8 also treats an already executed + verified deployment as durable
+  // project knowledge. This recorder can place DEPLOYMENT.md in the actual
+  // project subdirectory and persist the commands/facts learned by the Agent so
+  // a fresh conversation is not forced to rediscover the same deployment.
+  installObservedDeploymentRunbook(ctx, linkedStore)
 
   // 0.8.1 keeps deployment logic visible without forcing artificial atomization.
   // Compound shell blocks are allowed when fully shown in DEPLOYMENT.md; the
