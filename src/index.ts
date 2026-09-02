@@ -8,6 +8,7 @@ import { installLinkedSsh } from './linked-ssh.ts'
 import { installLinkedSshAgentTools } from './linked-ssh-tools.ts'
 import { installLinkedSshVisionTool } from './linked-ssh-vision.ts'
 import { installLinkedSshOcrTool } from './linked-ssh-ocr.ts'
+import { installPersistenceClaimSafety } from './persistence-claim-safety.ts'
 import { EphemeralRwSession, installRemoteWorkspaceSessionSafety } from './remote-workspace-safety.ts'
 import { installSessionSshTargetSafety } from './session-ssh-safety.ts'
 import { SharedDshSshHostTable } from './shared-hosts.ts'
@@ -169,6 +170,11 @@ export function apply(ctx: any): void {
   // model-facing dsh-rw surface from each conversation's actual cwd instead.
   const rwSession = new EphemeralRwSession()
   installRemoteWorkspaceSessionSafety(ctx)
+
+  // 0.8.9 requires postcondition evidence before a model may claim that a file
+  // mutation persisted, and hard-blocks DEPLOYMENT.md writes into dsh-rw
+  // placeholder/remote workspaces where they could be misreported as local.
+  installPersistenceClaimSafety(ctx)
 
   // Remote workspace + native Read/Write/Edit/Glob/Grep/Bash shim, sharing the
   // dsh-ssh host store instead of maintaining a second SSH configuration.
