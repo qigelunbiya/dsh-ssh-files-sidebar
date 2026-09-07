@@ -2,55 +2,44 @@ import { listRemoteDir, readRemoteFile, writeRemoteFile } from './api.ts'
 
 const SSH_ROOT_SELECTOR = '[data-dsh-ssh-files-root="true"]'
 const PANEL_HOST_SELECTOR = '[data-dsh-panel-host]'
-const ACTION_ATTR = 'data-dsh-cross-files-action'
-const TOAST_ATTR = 'data-dsh-cross-files-clipboard-toast'
+const ADDON_MENU_ATTR = 'data-dsh-cross-files-clipboard-menu'
 
-interface LocalFilePayload {
-  kind: 'local'
+interface CrossFilesClipboardOptions {
+  sessionId: string
+  localCwd: string
+  alias: string
+}
+
+interface LocalClipboardFile {
+  kind: 'local-file'
   sessionId: string
   cwd: string
   path: string
   name: string
 }
 
-interface SshFilePayload {
-  kind: 'ssh'
+interface RemoteClipboardFile {
+  kind: 'remote-file'
   sessionId: string
   alias: string
   path: string
   name: string
 }
 
-type CrossFilesClipboardPayload = LocalFilePayload | SshFilePayload
+type CrossFilesClipboard = LocalClipboardFile | RemoteClipboardFile
 
-export interface CrossFilesClipboardOptions {
-  sessionId: string
-  localCwd: string
-  alias: string
-}
-
-interface PendingContext {
-  side: 'local' | 'ssh'
-  target: Element
-  anchor: HTMLElement
-  copyPayload: CrossFilesClipboardPayload | null
-  remoteDirectory?: string
-  x: number
-  y: number
-}
-
-interface Installation {
-  refs: number
-  dispose: () => void
-}
-
-let clipboard: CrossFilesClipboardPayload | null = null
-const installations = new Map<string, Installation>()
+let clipboard: CrossFilesClipboard | null = null
 
 function asElement(target: EventTarget | null): Element | null {
   if (target instanceof Element) return target
   if (target instanceof Node) return target.parentElement
   return null
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+  const element = asElement(target)
+  if (element === null) return false
+  return element.closest('input, textarea, [contenteditable="true"], .cm-editor, .xterm') !== null
 }
 
 function localBaseName(path: string): string {
@@ -102,38 +91,6 @@ function localFileRow(target: EventTarget | null, cwd: string): { row: HTMLEleme
   return { row, path }
 }
 
-function remoteRootForTarget(target: EventTarget | null, options: CrossFilesClipboardOptions): HTMLElement | null {
-  const root = asElement(target)?.closest<HTMLElement>(SSH_ROOT_SELECTOR) ?? null
-  if (root === null) return null
-  if (root.dataset.sessionId !== options.sessionId || root.dataset.sshAlias !== options.alias) return null
-  return root
-}
-
-function remoteFileButton(target: EventTarget | null, options: CrossFilesClipboardOptions): { button: HTMLButtonElement; root: HTMLElement; path: string } | null {
-  const root = remoteRootForTarget(target, options)
-  if (root === null) return null
-  const element = asElement(target)
-  const button = element?.closest<HTMLButtonElement>('button[title]') ?? null
-  if (button === null || !root.contains(button)) return null
-  const icon = button.querySelector<HTMLElement>('span[aria-hidden="true"]')?.textContent?.trim() ?? ''
-  if (icon !== '📄') return null
-  const path = remotePathFromTitle(button.getAttribute('title') ?? '')
-  if (!path.startsWith('/')) return null
-  return { button, root, path }
-}
-
-function remoteDirectoryForTarget(target: EventTarget | null, root: HTMLElement): string {
-  const element = asElement(target)
-  const button = element?.closest<HTMLButtonElement>('button[title]') ?? null
-  if (button === null || !root.contains(button)) return '/'
-  const icon = button.querySelector<HTMLElement>('span[aria-hidden="true"]')?.textContent?.trim() ?? ''
-  const path = remotePathFromTitle(button.getAttribute('title') ?? '')
-  if (!path.startsWith('/')) return '/'
-  if (icon === '📁' || icon === '📂') return path
-  if (icon === '📄') return remoteParent(path)
-  return '/'
-}
-
 function isLocalFilesPanel(panel: HTMLElement, cwd: string): boolean {
   if (panel.querySelector(SSH_ROOT_SELECTOR) !== null) return false
 
@@ -152,236 +109,157 @@ function isLocalFilesPanel(panel: HTMLElement, cwd: string): boolean {
   return false
 }
 
-function localFilesPanelForTarget(target: EventTarget | null, cwd: string): HTMLElement | null {
-  const panel = asElement(target)?.closest<HTMLElement>(PANEL_HOST_SELECTOR) ?? null
-  return panel !== null && isLocalFilesPanel(panel, cwd) ? panel : null
+function localFilesTarget(target: EventTarget | null, cwd: string): { panel: HTMLElement; target: Element } | null {
+  const element = asElement(target)
+  if (element === null || element.closest(SSH_ROOT_SELECTOR) !== null) return null
+  const panel = element.closest<HTMLElement>(PANEL_HOST_SELECTOR)
+  if (panel === null || !isLocalFilesPanel(panel, cwd)) return null
+  return { panel, target: element }
 }
 
-async function readLocalWorkspaceFile(payload: LocalFilePayload): Promise<Blob> {
+function remoteFileButton(target: EventTarget | null): { button: HTMLButtonElement; root: HTMLElement; path: string } | null {
+  const element = asElement(target)
+  const root = element?.closest<HTMLElement>(SSH_ROOT_SELECTOR) ?? null
+  if (root === null) return null
+  const button = element?.closest<HTMLButtonElement>('button[title]') ?? null
+  if (button === null || !root.contains(button)) return null
+  const icon = button.querySelector<HTMLElement>('span[aria-hidden="true"]')?.textContent?.trim() ?? ''
+  if (icon !== '📄') return null
+  const path = remotePathFromTitle(button.getAttribute('title') ?? '')
+  if (!path.startsWith('/')) return null
+  return { button, root, path }
+}
+
+function remoteRootForTarget(target: EventTarget | null, sessionId: string, alias: string): HTMLElement | null {
+  const root = asElement(target)?.closest<HTMLElement>(SSH_ROOT_SELECTOR) ?? null
+  if (root === null) return null
+  if (root.dataset.sessionId !== sessionId || root.dataset.sshAlias !== alias) return null
+  return root
+}
+
+function remoteDirectoryForTarget(target: EventTarget | null, root: HTMLElement): string {
+  const element = asElement(target)
+  const button = element?.closest<HTMLButtonElement>('button[title]') ?? null
+  if (button === null || !root.contains(button)) return '/'
+  const icon = button.querySelector<HTMLElement>('span[aria-hidden="true"]')?.textContent?.trim() ?? ''
+  const path = remotePathFromTitle(button.getAttribute('title') ?? '')
+  if (!path.startsWith('/')) return '/'
+  if (icon === '📁' || icon === '📂') return path
+  if (icon === '📄') return remoteParent(path)
+  return '/'
+}
+
+async function readLocalWorkspaceFile(source: LocalClipboardFile): Promise<Blob> {
   const params = new URLSearchParams({
-    sessionId: payload.sessionId,
-    cwd: payload.cwd,
-    path: payload.path,
+    sessionId: source.sessionId,
+    cwd: source.cwd,
+    path: source.path,
     download: '1',
   })
   const response = await fetch(`/sidebar/file?${params.toString()}`)
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(text || `读取工作区文件失败：HTTP ${response.status}`)
+    throw new Error(text || `读取本地文件失败：HTTP ${response.status}`)
   }
   return await response.blob()
 }
 
 function dispatchFilesDrop(target: Element, files: File[]): boolean {
   if (typeof DataTransfer !== 'function' || typeof DragEvent !== 'function') {
-    throw new Error('当前浏览器不支持 DataTransfer，无法把 SSH 文件粘贴到 Files。')
+    throw new Error('当前浏览器不支持 DataTransfer，无法把 SSH 文件粘贴到本地 Files。')
   }
   const transfer = new DataTransfer()
   for (const file of files) transfer.items.add(file)
   for (const type of ['dragenter', 'dragover'] as const) {
-    target.dispatchEvent(new DragEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      dataTransfer: transfer,
-    }))
+    target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer }))
   }
-  const drop = new DragEvent('drop', {
-    bubbles: true,
-    cancelable: true,
-    dataTransfer: transfer,
-  })
+  const drop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
   target.dispatchEvent(drop)
   return drop.defaultPrevented
 }
 
-function showToast(anchor: HTMLElement, message: string, error = false): void {
-  let toast = document.querySelector<HTMLElement>(`[${TOAST_ATTR}="true"]`)
-  if (toast === null) {
-    toast = document.createElement('div')
-    toast.setAttribute(TOAST_ATTR, 'true')
-    Object.assign(toast.style, {
-      position: 'fixed',
-      zIndex: '10030',
-      maxWidth: '320px',
-      padding: '7px 10px',
-      borderRadius: '7px',
-      fontSize: '12px',
-      lineHeight: '1.35',
-      boxShadow: '0 4px 18px rgba(0,0,0,.18)',
-      pointerEvents: 'none',
-    })
-    document.body.appendChild(toast)
-  }
-
-  const rect = anchor.getBoundingClientRect()
-  const width = Math.min(320, Math.max(180, rect.width - 20))
-  const left = Math.max(8, Math.min(rect.right - width - 10, window.innerWidth - width - 8))
-  const top = Math.max(8, Math.min(rect.bottom - 46, window.innerHeight - 54))
-  toast.style.width = `${width}px`
-  toast.style.left = `${left}px`
-  toast.style.top = `${top}px`
-  toast.style.background = error ? 'rgba(180,45,55,.94)' : 'rgba(35,45,62,.94)'
-  toast.style.color = 'white'
+function showToast(message: string, error = false): void {
+  const previous = document.querySelector<HTMLElement>('[data-dsh-cross-files-clipboard-toast="true"]')
+  previous?.remove()
+  const toast = document.createElement('div')
+  toast.dataset.dshCrossFilesClipboardToast = 'true'
   toast.textContent = message
-
-  window.setTimeout(() => {
-    if (toast?.isConnected && toast.textContent === message) toast.remove()
-  }, error ? 4200 : 2400)
+  Object.assign(toast.style, {
+    position: 'fixed',
+    right: '18px',
+    bottom: '18px',
+    zIndex: '10050',
+    maxWidth: '420px',
+    padding: '8px 11px',
+    borderRadius: '7px',
+    background: error ? 'rgba(180,45,55,.96)' : 'rgba(35,45,62,.96)',
+    color: 'white',
+    boxShadow: '0 5px 20px rgba(0,0,0,.24)',
+    fontSize: '12px',
+    lineHeight: '1.4',
+    pointerEvents: 'none',
+  })
+  document.body.appendChild(toast)
+  window.setTimeout(() => { if (toast.isConnected) toast.remove() }, error ? 4600 : 2800)
 }
 
-function setClipboard(payload: CrossFilesClipboardPayload, anchor: HTMLElement): void {
-  clipboard = payload
-  showToast(
-    anchor,
-    payload.kind === 'local'
-      ? `已复制 ${payload.name}，可到 SSH Files 右键粘贴`
-      : `已复制 ${payload.name}，可到 Files 右键粘贴`,
-  )
+function removeAddonMenu(): void {
+  document.querySelector<HTMLElement>(`[${ADDON_MENU_ATTR}="true"]`)?.remove()
 }
 
-function localClipboardFor(options: CrossFilesClipboardOptions): LocalFilePayload | null {
-  if (clipboard?.kind !== 'local') return null
-  if (clipboard.sessionId !== options.sessionId) return null
-  if (normalizeLocalPath(clipboard.cwd) !== normalizeLocalPath(options.localCwd)) return null
-  if (!localPathWithin(clipboard.path, options.localCwd)) return null
-  return clipboard
-}
-
-function sshClipboardFor(options: CrossFilesClipboardOptions): SshFilePayload | null {
-  if (clipboard?.kind !== 'ssh') return null
-  if (clipboard.sessionId !== options.sessionId || clipboard.alias !== options.alias) return null
-  if (!clipboard.path.startsWith('/')) return null
-  return clipboard
-}
-
-async function pasteLocalToRemote(
-  options: CrossFilesClipboardOptions,
-  directory: string,
-  anchor: HTMLElement,
-): Promise<void> {
-  const payload = localClipboardFor(options)
-  if (payload === null) return
-  try {
-    showToast(anchor, `正在粘贴 ${payload.name} → ${options.alias}:${directory}`)
-    const existing = await listRemoteDir(options.alias, directory)
-    if (existing.some(entry => entry.name === payload.name)) {
-      const destination = directory === '/' ? `/${payload.name}` : `${directory}/${payload.name}`
-      if (!window.confirm(`${destination} 已存在，是否覆盖？`)) {
-        showToast(anchor, '已取消粘贴')
-        return
-      }
-    }
-    const blob = await readLocalWorkspaceFile(payload)
-    const destination = directory === '/' ? `/${payload.name}` : `${directory}/${payload.name}`
-    await writeRemoteFile(options.alias, destination, blob)
-    showToast(anchor, `已粘贴到 ${options.alias}:${directory}`)
-    anchor.querySelector<HTMLButtonElement>('button[title="刷新全部"]')?.click()
-  } catch (error) {
-    showToast(anchor, error instanceof Error ? error.message : String(error), true)
-  }
-}
-
-async function pasteRemoteToLocal(
-  options: CrossFilesClipboardOptions,
-  target: Element,
-  anchor: HTMLElement,
-): Promise<void> {
-  const payload = sshClipboardFor(options)
-  if (payload === null) return
-  try {
-    showToast(anchor, `正在粘贴 ${payload.name} → Files`)
-    const blob = await readRemoteFile(options.alias, payload.path)
-    const file = new File([blob], payload.name, {
-      type: blob.type || 'application/octet-stream',
-      lastModified: Date.now(),
-    })
-    const accepted = dispatchFilesDrop(target, [file])
-    if (!accepted) throw new Error('请在 Files 的工作区根目录、目录行或文件行上执行粘贴。')
-    showToast(anchor, `已提交 ${payload.name} 到 Files`)
-  } catch (error) {
-    showToast(anchor, error instanceof Error ? error.message : String(error), true)
-  }
-}
-
-function isVisible(element: HTMLElement): boolean {
-  const rect = element.getBoundingClientRect()
-  const style = window.getComputedStyle(element)
-  return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
-}
-
-function pointDistance(rect: DOMRect, x: number, y: number): number {
-  const dx = x < rect.left ? rect.left - x : x > rect.right ? x - rect.right : 0
-  const dy = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0
-  return Math.hypot(dx, dy)
-}
-
-function fixedRemoteMenu(): HTMLElement | null {
-  for (const element of Array.from(document.querySelectorAll<HTMLElement>('div'))) {
-    if (element.style.position !== 'fixed' || element.style.zIndex !== '9999') continue
-    if (!isVisible(element)) continue
+function findNativeMenuRect(x: number, y: number): DOMRect | null {
+  const candidates = Array.from(document.querySelectorAll<HTMLElement>('[role="menu"], div'))
+  let best: { rect: DOMRect; area: number } | null = null
+  for (const element of candidates) {
     const text = element.textContent ?? ''
-    if (text.includes('刷新目录') && (text.includes('重命名') || text.includes('新建目录'))) return element
+    const looksLikeFilesMenu =
+      text.includes('复制相对路径') || text.includes('复制绝对路径') ||
+      text.includes('Copy relative') || text.includes('Copy absolute') ||
+      text.includes('刷新目录') || text.includes('Refresh directory')
+    if (!looksLikeFilesMenu) continue
+    const style = window.getComputedStyle(element)
+    if (style.display === 'none' || style.visibility === 'hidden') continue
+    const rect = element.getBoundingClientRect()
+    if (rect.width < 80 || rect.height < 30) continue
+    const closeToPoint = x >= rect.left - 20 && x <= rect.right + 20 && y >= rect.top - 20 && y <= rect.bottom + 20
+    if (!closeToPoint) continue
+    const area = rect.width * rect.height
+    if (best === null || area < best.area) best = { rect, area }
   }
-  return null
+  return best?.rect ?? null
 }
 
-function localMenuNearPoint(x: number, y: number): HTMLElement | null {
-  const roleMenus = Array.from(document.querySelectorAll<HTMLElement>('[role="menu"]'))
-    .filter(isVisible)
-    .sort((a, b) => pointDistance(a.getBoundingClientRect(), x, y) - pointDistance(b.getBoundingClientRect(), x, y))
-  if (roleMenus[0] !== undefined && pointDistance(roleMenus[0].getBoundingClientRect(), x, y) < 160) return roleMenus[0]
-
-  const px = Math.max(1, Math.min(window.innerWidth - 2, x + 5))
-  const py = Math.max(1, Math.min(window.innerHeight - 2, y + 5))
-  for (const start of document.elementsFromPoint(px, py)) {
-    let current: Element | null = start
-    while (current instanceof HTMLElement && current !== document.body) {
-      const rect = current.getBoundingClientRect()
-      const buttons = current.querySelectorAll('button')
-      if (buttons.length >= 2 && rect.width >= 100 && rect.width <= 460 && rect.height <= 760 && isVisible(current)) {
-        return current
-      }
-      current = current.parentElement
-    }
-  }
-  return null
+function actionLabel(kind: 'copy' | 'paste'): string {
+  const lang = (document.documentElement.lang || navigator.language || '').toLowerCase()
+  if (lang.startsWith('zh')) return kind === 'copy' ? '复制文件' : '粘贴文件'
+  return kind === 'copy' ? 'Copy file' : 'Paste file'
 }
 
-function findContextMenu(context: PendingContext): HTMLElement | null {
-  return context.side === 'ssh' ? fixedRemoteMenu() : localMenuNearPoint(context.x, context.y)
-}
-
-function closeContextMenu(menu: HTMLElement): void {
-  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
-  const siblings = menu.parentElement?.children ?? []
-  for (const sibling of Array.from(siblings)) {
-    if (!(sibling instanceof HTMLElement) || sibling === menu) continue
-    if (sibling.style.position === 'fixed' && sibling.style.zIndex === '9998') {
-      sibling.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-      return
-    }
-  }
-}
-
-function injectAction(
-  menu: HTMLElement,
-  id: 'copy' | 'paste',
-  label: string,
-  action: () => void,
+function showAddonMenu(
+  point: { x: number; y: number },
+  actions: Array<{ kind: 'copy' | 'paste'; run: () => void | Promise<unknown> }>,
 ): void {
-  if (menu.querySelector(`[${ACTION_ATTR}="${id}"]`) !== null) return
-  const template = Array.from(menu.querySelectorAll<HTMLButtonElement>('button'))
-    .find(button => window.getComputedStyle(button).display !== 'none')
-  const button = document.createElement('button')
-  button.type = 'button'
-  button.setAttribute(ACTION_ATTR, id)
-  button.textContent = label
-  if (template !== undefined) {
-    button.className = template.className
-    button.style.cssText = template.style.cssText
-    button.style.display = ''
-    button.style.color = ''
-  } else {
+  removeAddonMenu()
+  if (actions.length === 0) return
+
+  const menu = document.createElement('div')
+  menu.setAttribute(ADDON_MENU_ATTR, 'true')
+  Object.assign(menu.style, {
+    position: 'fixed',
+    zIndex: '10002',
+    width: '154px',
+    padding: '5px',
+    borderRadius: '8px',
+    border: '1px solid rgba(128,128,128,.30)',
+    background: 'var(--color-background, Canvas)',
+    color: 'inherit',
+    boxShadow: '0 8px 28px rgba(0,0,0,.22)',
+  })
+
+  for (const action of actions) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.textContent = actionLabel(action.kind)
     Object.assign(button.style, {
       width: '100%',
       border: '0',
@@ -393,208 +271,243 @@ function injectAction(
       cursor: 'pointer',
       fontSize: '12px',
     })
+    button.addEventListener('mouseenter', () => { button.style.background = 'rgba(128,128,128,.12)' })
+    button.addEventListener('mouseleave', () => { button.style.background = 'transparent' })
+    button.addEventListener('mousedown', event => { event.preventDefault(); event.stopPropagation() })
+    button.addEventListener('click', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      removeAddonMenu()
+      void action.run()
+    })
+    menu.appendChild(button)
   }
-  button.addEventListener('mousedown', event => { event.stopPropagation() })
-  button.addEventListener('click', event => {
-    event.preventDefault()
-    event.stopPropagation()
-    closeContextMenu(menu)
-    action()
+
+  document.body.appendChild(menu)
+  window.requestAnimationFrame(() => {
+    const menuRect = menu.getBoundingClientRect()
+    const native = findNativeMenuRect(point.x, point.y)
+    const gap = 6
+    let left: number
+    let top: number
+    if (native !== null) {
+      left = native.right + gap
+      if (left + menuRect.width > window.innerWidth - gap) left = native.left - menuRect.width - gap
+      top = native.top
+    } else {
+      left = point.x + 12
+      if (left + menuRect.width > window.innerWidth - gap) left = point.x - menuRect.width - 12
+      top = point.y
+    }
+    left = Math.max(gap, Math.min(left, window.innerWidth - menuRect.width - gap))
+    top = Math.max(gap, Math.min(top, window.innerHeight - menuRect.height - gap))
+    menu.style.left = `${left}px`
+    menu.style.top = `${top}px`
   })
-  const firstButton = menu.querySelector('button')
-  if (firstButton !== null) menu.insertBefore(button, firstButton)
-  else menu.appendChild(button)
-}
-
-function augmentContextMenu(context: PendingContext, options: CrossFilesClipboardOptions): boolean {
-  const menu = findContextMenu(context)
-  if (menu === null) return false
-
-  if (context.copyPayload !== null) {
-    injectAction(menu, 'copy', '复制文件', () => { setClipboard(context.copyPayload!, context.anchor) })
-  }
-
-  if (context.side === 'ssh' && localClipboardFor(options) !== null) {
-    const directory = context.remoteDirectory ?? '/'
-    injectAction(menu, 'paste', '粘贴文件', () => { void pasteLocalToRemote(options, directory, context.anchor) })
-  }
-  if (context.side === 'local' && sshClipboardFor(options) !== null) {
-    injectAction(menu, 'paste', '粘贴文件', () => { void pasteRemoteToLocal(options, context.target, context.anchor) })
-  }
-  return true
-}
-
-function editableTarget(target: EventTarget | null): boolean {
-  const element = asElement(target)
-  return element?.closest('input, textarea, select, [contenteditable="true"], .cm-editor, .xterm') !== null
-}
-
-function install(options: CrossFilesClipboardOptions): () => void {
-  let raf1 = 0
-  let raf2 = 0
-  const timers = new Set<number>()
-
-  const clearScheduled = (): void => {
-    if (raf1 !== 0) window.cancelAnimationFrame(raf1)
-    if (raf2 !== 0) window.cancelAnimationFrame(raf2)
-    raf1 = 0
-    raf2 = 0
-    for (const timer of timers) window.clearTimeout(timer)
-    timers.clear()
-  }
-
-  const scheduleAugment = (context: PendingContext): void => {
-    clearScheduled()
-    const attempt = (): void => { augmentContextMenu(context, options) }
-    raf1 = window.requestAnimationFrame(() => {
-      raf1 = 0
-      raf2 = window.requestAnimationFrame(() => {
-        raf2 = 0
-        attempt()
-      })
-    })
-    for (const delay of [45, 110]) {
-      const timer = window.setTimeout(() => {
-        timers.delete(timer)
-        attempt()
-      }, delay)
-      timers.add(timer)
-    }
-  }
-
-  const onContextMenu = (event: MouseEvent): void => {
-    const remoteRoot = remoteRootForTarget(event.target, options)
-    if (remoteRoot !== null) {
-      const remoteFile = remoteFileButton(event.target, options)
-      scheduleAugment({
-        side: 'ssh',
-        target: asElement(event.target) ?? remoteRoot,
-        anchor: remoteRoot,
-        copyPayload: remoteFile === null ? null : {
-          kind: 'ssh',
-          sessionId: options.sessionId,
-          alias: options.alias,
-          path: remoteFile.path,
-          name: remoteBaseName(remoteFile.path),
-        },
-        remoteDirectory: remoteDirectoryForTarget(event.target, remoteRoot),
-        x: event.clientX,
-        y: event.clientY,
-      })
-      return
-    }
-
-    const localPanel = localFilesPanelForTarget(event.target, options.localCwd)
-    if (localPanel === null) return
-    const localFile = localFileRow(event.target, options.localCwd)
-    scheduleAugment({
-      side: 'local',
-      target: asElement(event.target) ?? localPanel,
-      anchor: localPanel,
-      copyPayload: localFile === null ? null : {
-        kind: 'local',
-        sessionId: options.sessionId,
-        cwd: options.localCwd,
-        path: localFile.path,
-        name: localBaseName(localFile.path),
-      },
-      x: event.clientX,
-      y: event.clientY,
-    })
-  }
-
-  const onKeyDown = (event: KeyboardEvent): void => {
-    if (!(event.ctrlKey || event.metaKey) || event.altKey || editableTarget(event.target)) return
-    const key = event.key.toLowerCase()
-    if (key !== 'c' && key !== 'v') return
-    const target = asElement(event.target) ?? asElement(document.activeElement)
-    if (target === null) return
-
-    const remoteRoot = remoteRootForTarget(target, options)
-    if (remoteRoot !== null) {
-      if (key === 'c') {
-        const remoteFile = remoteFileButton(target, options)
-        if (remoteFile === null) return
-        event.preventDefault()
-        event.stopPropagation()
-        setClipboard({
-          kind: 'ssh',
-          sessionId: options.sessionId,
-          alias: options.alias,
-          path: remoteFile.path,
-          name: remoteBaseName(remoteFile.path),
-        }, remoteRoot)
-        return
-      }
-      if (localClipboardFor(options) === null) return
-      event.preventDefault()
-      event.stopPropagation()
-      void pasteLocalToRemote(options, remoteDirectoryForTarget(target, remoteRoot), remoteRoot)
-      return
-    }
-
-    const localPanel = localFilesPanelForTarget(target, options.localCwd)
-    if (localPanel === null) return
-    if (key === 'c') {
-      const localFile = localFileRow(target, options.localCwd)
-      if (localFile === null) return
-      event.preventDefault()
-      event.stopPropagation()
-      setClipboard({
-        kind: 'local',
-        sessionId: options.sessionId,
-        cwd: options.localCwd,
-        path: localFile.path,
-        name: localBaseName(localFile.path),
-      }, localPanel)
-      return
-    }
-    if (sshClipboardFor(options) === null) return
-    event.preventDefault()
-    event.stopPropagation()
-    void pasteRemoteToLocal(options, target, localPanel)
-  }
-
-  document.addEventListener('contextmenu', onContextMenu, true)
-  document.addEventListener('keydown', onKeyDown, true)
-  return () => {
-    clearScheduled()
-    document.removeEventListener('contextmenu', onContextMenu, true)
-    document.removeEventListener('keydown', onKeyDown, true)
-  }
 }
 
 /**
- * Add an internal file clipboard between better-sidebar Files and SSH Files.
+ * Cross-pane file clipboard for the visible local Files and SSH Files panes.
  *
- * This intentionally transfers file bytes only when Paste is invoked. Copy is
- * just a session-bound path token, so large files are not read into browser
- * memory merely because the user right-clicked Copy. The actual transfer reuses
- * the same local raw-file route, SFTP writer, and better-sidebar upload/drop
- * pipeline as cross-pane drag/drop, including overwrite confirmation and target
- * semantics (directory row = inside it, file row = its parent, root = root).
+ * This deliberately does NOT try to mutate better-sidebar's React context-menu
+ * DOM. That menu is portaled outside the panel and its internal structure is not
+ * a stable extension API. Instead we keep a tiny adjacent transfer menu whose
+ * actions use the same proven transfer paths as drag/drop. This makes copy/paste
+ * work for file rows, directory rows, file-parent targets and blank/root areas.
  */
 export function installCrossFilesClipboard(options: CrossFilesClipboardOptions): () => void {
-  const key = `${options.sessionId}\n${normalizeLocalPath(options.localCwd)}\n${options.alias}`
-  const existing = installations.get(key)
-  if (existing !== undefined) {
-    existing.refs += 1
-    return () => {
-      existing.refs -= 1
-      if (existing.refs <= 0) {
-        existing.dispose()
-        installations.delete(key)
+  const { sessionId, localCwd, alias } = options
+  let lastLocalTarget: Element | null = null
+  let lastRemoteTarget: Element | null = null
+
+  const copyLocal = (target: EventTarget | null): boolean => {
+    const file = localFileRow(target, localCwd)
+    if (file === null) return false
+    clipboard = {
+      kind: 'local-file',
+      sessionId,
+      cwd: localCwd,
+      path: file.path,
+      name: localBaseName(file.path),
+    }
+    showToast(`已复制 ${clipboard.name}，可到 SSH Files 目标目录右键粘贴或按 Ctrl+V`)
+    return true
+  }
+
+  const copyRemote = (target: EventTarget | null): boolean => {
+    const file = remoteFileButton(target)
+    if (file === null || file.root.dataset.sessionId !== sessionId || file.root.dataset.sshAlias !== alias) return false
+    clipboard = {
+      kind: 'remote-file',
+      sessionId,
+      alias,
+      path: file.path,
+      name: remoteBaseName(file.path),
+    }
+    showToast(`已复制 ${clipboard.name}，可到 Files 目标目录右键粘贴或按 Ctrl+V`)
+    return true
+  }
+
+  const pasteToRemote = async (target: EventTarget | null): Promise<boolean> => {
+    if (clipboard === null) return false
+    if (clipboard.sessionId !== sessionId) {
+      showToast('剪贴板来自另一个会话，请在当前会话重新复制文件。', true)
+      return true
+    }
+    const root = remoteRootForTarget(target, sessionId, alias)
+    if (root === null) return false
+    const directory = remoteDirectoryForTarget(target, root)
+    try {
+      const sourceName = clipboard.name
+      const destination = directory === '/' ? `/${sourceName}` : `${directory}/${sourceName}`
+      if (clipboard.kind === 'remote-file' && clipboard.alias === alias && clipboard.path === destination) {
+        showToast('源文件和目标文件相同，不需要粘贴。')
+        return true
+      }
+      showToast(`正在粘贴 ${sourceName} → ${alias}:${directory}`)
+      const existing = await listRemoteDir(alias, directory)
+      if (existing.some((entry: { name: string }) => entry.name === sourceName)) {
+        if (!window.confirm(`${destination} 已存在，是否覆盖？`)) {
+          showToast('已取消粘贴')
+          return true
+        }
+      }
+      const blob = clipboard.kind === 'local-file'
+        ? await readLocalWorkspaceFile(clipboard)
+        : await readRemoteFile(clipboard.alias, clipboard.path)
+      await writeRemoteFile(alias, destination, blob)
+      root.querySelector<HTMLButtonElement>('button[title="刷新全部"]')?.click()
+      showToast(`已粘贴到 ${alias}:${directory}`)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), true)
+    }
+    return true
+  }
+
+  const pasteToLocal = async (target: EventTarget | null): Promise<boolean> => {
+    if (clipboard === null) return false
+    if (clipboard.sessionId !== sessionId) {
+      showToast('剪贴板来自另一个会话，请在当前会话重新复制文件。', true)
+      return true
+    }
+    const local = localFilesTarget(target, localCwd)
+    if (local === null) return false
+    try {
+      showToast(`正在粘贴 ${clipboard.name} → Files`)
+      const blob = clipboard.kind === 'remote-file'
+        ? await readRemoteFile(clipboard.alias, clipboard.path)
+        : await readLocalWorkspaceFile(clipboard)
+      const file = new File([blob], clipboard.name, {
+        type: blob.type || 'application/octet-stream',
+        lastModified: Date.now(),
+      })
+      const accepted = dispatchFilesDrop(local.target, [file])
+      if (!accepted) throw new Error('请在 Files 的工作区根、目录行、文件行或文件树空白区域上粘贴。')
+      showToast(`已粘贴 ${clipboard.name} 到 Files`)
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), true)
+    }
+    return true
+  }
+
+  const rememberTarget = (target: EventTarget | null): void => {
+    const local = localFilesTarget(target, localCwd)
+    if (local !== null) {
+      lastLocalTarget = local.target
+      return
+    }
+    const remoteRoot = remoteRootForTarget(target, sessionId, alias)
+    if (remoteRoot !== null) lastRemoteTarget = asElement(target)
+  }
+
+  const onContextMenu = (event: MouseEvent): void => {
+    removeAddonMenu()
+    rememberTarget(event.target)
+
+    const local = localFilesTarget(event.target, localCwd)
+    if (local !== null) {
+      const copyable = localFileRow(event.target, localCwd) !== null
+      const actions: Array<{ kind: 'copy' | 'paste'; run: () => void | Promise<unknown> }> = []
+      if (copyable) actions.push({ kind: 'copy', run: () => { copyLocal(event.target) } })
+      if (clipboard !== null) actions.push({ kind: 'paste', run: () => pasteToLocal(event.target) })
+      if (actions.length > 0) {
+        const point = { x: event.clientX, y: event.clientY }
+        window.setTimeout(() => { showAddonMenu(point, actions) }, 0)
+      }
+      return
+    }
+
+    const root = remoteRootForTarget(event.target, sessionId, alias)
+    if (root !== null) {
+      const copyable = remoteFileButton(event.target) !== null
+      const actions: Array<{ kind: 'copy' | 'paste'; run: () => void | Promise<unknown> }> = []
+      if (copyable) actions.push({ kind: 'copy', run: () => { copyRemote(event.target) } })
+      if (clipboard !== null) actions.push({ kind: 'paste', run: () => pasteToRemote(event.target) })
+      if (actions.length > 0) {
+        const point = { x: event.clientX, y: event.clientY }
+        window.setTimeout(() => { showAddonMenu(point, actions) }, 0)
       }
     }
   }
 
-  const created: Installation = { refs: 1, dispose: install(options) }
-  installations.set(key, created)
-  return () => {
-    created.refs -= 1
-    if (created.refs <= 0) {
-      created.dispose()
-      installations.delete(key)
+  const onPointerDown = (event: PointerEvent): void => {
+    const addon = asElement(event.target)?.closest(`[${ADDON_MENU_ATTR}="true"]`)
+    if (addon === null) removeAddonMenu()
+    rememberTarget(event.target)
+  }
+
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (isEditableTarget(event.target)) return
+    const mod = event.ctrlKey || event.metaKey
+    if (!mod) return
+    const key = event.key.toLowerCase()
+
+    if (key === 'c') {
+      if (copyLocal(event.target) || copyRemote(event.target) || copyLocal(lastLocalTarget) || copyRemote(lastRemoteTarget)) {
+        event.preventDefault()
+        event.stopPropagation()
+      }
+      return
     }
+
+    if (key !== 'v' || clipboard === null) return
+    const localNow = localFilesTarget(event.target, localCwd)
+    if (localNow !== null) {
+      event.preventDefault()
+      event.stopPropagation()
+      lastLocalTarget = localNow.target
+      void pasteToLocal(localNow.target)
+      return
+    }
+    const remoteNow = remoteRootForTarget(event.target, sessionId, alias)
+    if (remoteNow !== null) {
+      event.preventDefault()
+      event.stopPropagation()
+      lastRemoteTarget = asElement(event.target)
+      void pasteToRemote(event.target)
+      return
+    }
+    if (lastLocalTarget !== null) {
+      event.preventDefault()
+      event.stopPropagation()
+      void pasteToLocal(lastLocalTarget)
+      return
+    }
+    if (lastRemoteTarget !== null) {
+      event.preventDefault()
+      event.stopPropagation()
+      void pasteToRemote(lastRemoteTarget)
+    }
+  }
+
+  document.addEventListener('contextmenu', onContextMenu, true)
+  document.addEventListener('pointerdown', onPointerDown, true)
+  window.addEventListener('keydown', onKeyDown, true)
+
+  return () => {
+    removeAddonMenu()
+    document.removeEventListener('contextmenu', onContextMenu, true)
+    document.removeEventListener('pointerdown', onPointerDown, true)
+    window.removeEventListener('keydown', onKeyDown, true)
   }
 }
