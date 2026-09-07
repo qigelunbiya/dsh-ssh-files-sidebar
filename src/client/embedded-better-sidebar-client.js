@@ -4,8 +4,10 @@
 // upstream 0.16.1 client source into our single browser artifact.
 import { apply as applyBetterSidebarClient } from 'dsh-better-sidebar/src/client/index.tsx'
 import { installCrossFilesMenuMerge } from './cross-files-menu-merge.ts'
+import { installFilesContextMenuGuard } from './files-context-menu-guard.ts'
 
 export function apply(ctx) {
   applyBetterSidebarClient(ctx)
   installCrossFilesMenuMerge()
+  installFilesContextMenuGuard()
 }
