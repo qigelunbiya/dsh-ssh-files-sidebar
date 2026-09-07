@@ -6,6 +6,7 @@ import { registerLinkedSshReferenceSource } from './LinkedSshReferenceSource.ts'
 import { RemoteFilesTab, remoteWorkspaceAliasFromCwd } from './RemoteFilesTab.tsx'
 import { SessionSshTerminalView } from './SessionSshTerminalView.tsx'
 import { registerWorkspaceDirectoryFlow } from './WorkspaceDirectoryFlow.tsx'
+import { installCrossFilesClipboard } from './cross-files-clipboard.ts'
 import { installCrossFilesDragAndDrop } from './cross-files-dnd.ts'
 import { getLinkedSshAlias, useLinkedSshAlias } from './linked-ssh-store.ts'
 
@@ -23,20 +24,26 @@ function RemoteFilesForScope({ scope }: { scope: any }) {
   const effectiveAlias = remoteAlias ?? linkedAlias
   const localCwd = typeof scope?.cwd === 'string' && scope.cwd !== '' ? scope.cwd : null
 
-  // Cross-pane drag/drop follows the two panes that are actually visible in
-  // better-sidebar. In a normal local + Linked SSH session, Files is the real
-  // local Workspace. In a dsh-rw Remote Workspace, Files points at the local
-  // placeholder directory that better-sidebar is visibly rendering. Either
-  // way, the user's drag must work between the visible Files and SSH Files
-  // panes instead of being silently disabled just because the cwd is a remote
-  // placeholder.
+  // Cross-pane transfer follows the two panes that are actually visible in
+  // better-sidebar. Drag/drop stays available, and the same transfer semantics
+  // are now also exposed through an internal Copy/Paste clipboard (context menu
+  // plus Ctrl/Cmd+C and Ctrl/Cmd+V). In a normal local + Linked SSH session,
+  // Files is the real local Workspace. In a dsh-rw Remote Workspace, Files is
+  // the visible placeholder tree. Either way, the source token is path-only;
+  // file bytes are read only when Drop/Paste actually happens.
   useEffect(() => {
     if (effectiveAlias === null || localCwd === null) return
-    return installCrossFilesDragAndDrop({
+    const options = {
       sessionId,
       localCwd,
       alias: effectiveAlias,
-    })
+    }
+    const disposeDragAndDrop = installCrossFilesDragAndDrop(options)
+    const disposeClipboard = installCrossFilesClipboard(options)
+    return () => {
+      disposeClipboard()
+      disposeDragAndDrop()
+    }
   }, [sessionId, localCwd, effectiveAlias])
 
   if (effectiveAlias === null) {
