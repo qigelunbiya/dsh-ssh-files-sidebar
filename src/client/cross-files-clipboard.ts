@@ -1,7 +1,7 @@
 import { listRemoteDir, readRemoteFile, writeRemoteFile } from './api.ts'
 
 const SSH_ROOT_SELECTOR = '[data-dsh-ssh-files-root="true"]'
-const PANEL_HOST_SELECTOR = '[data-dsh-panel-host]'
+const PANEL_HOST_SELECTOR = '[data-dsh-pane]'
 const ADDON_MENU_ATTR = 'data-dsh-cross-files-clipboard-menu'
 
 interface CrossFilesClipboardOptions {
