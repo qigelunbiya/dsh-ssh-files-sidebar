@@ -3,7 +3,9 @@
 // project's stricter compiler options. tsdown still follows and bundles the
 // upstream 0.16.1 client source into our single browser artifact.
 import { apply as applyBetterSidebarClient } from 'dsh-better-sidebar/src/client/index.tsx'
+import { installCrossFilesMenuMerge } from './cross-files-menu-merge.ts'
 
 export function apply(ctx) {
   applyBetterSidebarClient(ctx)
+  installCrossFilesMenuMerge()
 }
